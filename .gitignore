@@ -1,0 +1,13 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+*.suo
+*.user
+
+# Secrets (never commit!)
+.env
+secrets.js
