@@ -14,6 +14,9 @@ const Graph = (() => {
     /**
      * Delta Syncs the SMS History from SharePoint, caching it in IndexedDB and RAM.
      */
+    /**
+     * Delta Syncs the SMS History from SharePoint, caching it in IndexedDB and RAM.
+     */
     syncSMSHistory: async function (
       lastSyncDate = null,
       existingMessages = [],
@@ -24,7 +27,6 @@ const Graph = (() => {
       if (!existingMessages || existingMessages.length === 0) {
         if (typeof LocalDB !== "undefined" && LocalDB.getAllItems) {
           existingMessages = await LocalDB.getAllItems("sms_history");
-          // Sort oldest to newest (chat history flow)
           existingMessages.sort(
             (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
           );
@@ -43,7 +45,6 @@ const Graph = (() => {
         listId +
         "/items?$expand=fields($select=Title,Direction,MessageBody,Agent,DeliveryStatus,Created)&$top=5000";
 
-      // Apply the Delta filter if we already have a baseline
       if (effectiveSyncDate) {
         const safeDate = effectiveSyncDate.split(".")[0] + "Z";
         url += `&$filter=fields/Created gt '${safeDate}'`;
@@ -51,12 +52,10 @@ const Graph = (() => {
 
       const raw = await getAllItems(url);
 
-      // If no new messages, return what we have
       if (raw.length === 0) {
         return { updatedMessages: existingMessages, newSyncDate: lastSyncDate };
       }
 
-      // Map the new messages
       const newMessages = raw.map((item) => ({
         id: item.id,
         cbr: item.fields.Title,
@@ -67,15 +66,21 @@ const Graph = (() => {
         timestamp: item.fields.Created,
       }));
 
-      // Cache to IndexedDB in the background
+      // 🚀 THE FIX: Use a Map to deduplicate by ID. This naturally overrides
+      // your local "Pending" texts with the "Delivered" texts from SharePoint!
+      const msgMap = new Map();
+      existingMessages.forEach((m) => msgMap.set(m.id, m));
+      newMessages.forEach((m) => msgMap.set(m.id, m));
+
+      const finalizedMessages = Array.from(msgMap.values());
+      finalizedMessages.sort(
+        (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
+      );
+
       if (typeof LocalDB !== "undefined" && LocalDB.saveItems) {
-        await LocalDB.saveItems("sms_history", newMessages);
+        await LocalDB.saveItems("sms_history", newMessages); // IndexedDB handles overwrites automatically via keyPath
       }
 
-      // Merge arrays (new messages go to the end to maintain chronological order)
-      const finalizedMessages = [...existingMessages, ...newMessages];
-
-      // Update the high-water mark sync date
       const validTimestamps = newMessages
         .map((m) => new Date(m.timestamp).getTime())
         .filter((t) => !isNaN(t));

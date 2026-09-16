@@ -1325,6 +1325,9 @@ function startSalesFeedPolling() {
       // before they can trigger the Triage Inbox UI or bother the reps
       await processSilentTriage(State.leads);
 
+      if (typeof SMS !== "undefined" && SMS.currentLead) {
+        SMS.loadConversation(SMS.currentLead);
+      }
       // 4. Update sales ticker and dashboard UI
       const newSales = Graph.getTodaySales(State.activityLog);
       State.todaySales = newSales;
@@ -1624,7 +1627,7 @@ function renderMyLeads() {
   //  THE STRICT BOUNCER
   // ==========================================
   let myLeads;
-  let hiddenByTimezone = 0; // 🕵️ NEW: Our tracker for sleeping leads!
+  let hiddenByTimezone = 0;
 
   const filterNow = new Date();
   const filterTodayMidnight = new Date(filterNow);
@@ -1636,7 +1639,6 @@ function renderMyLeads() {
     myLeads = window._myLeads;
   } else {
     myLeads = State.leads.filter((l) => {
-      // 1. Agent Match
       const assigned = (l.assignedTo || "")
         .toLowerCase()
         .replace(/\s+/g, " ")
@@ -1648,14 +1650,9 @@ function renderMyLeads() {
           assigned === userEmail.replace(/\s+/g, " "));
 
       if (!matchesAgent) return false;
-
-      // 2. Terminal Status
       if (Config.terminalStatuses.includes(l.status)) return false;
-
-      // 2.5 🛑 3rd Contact Eviction
       if (l.status === "3rd Contact") return false;
 
-      // 3. Dismissed Leads
       if (
         window._skippedSessionLeads &&
         window._skippedSessionLeads.includes(l.id)
@@ -1663,7 +1660,6 @@ function renderMyLeads() {
         return false;
       }
 
-      // 3.5 Patch for the lead polling
       if (window._sessionWorkedLeads && window._sessionWorkedLeads.has(l.id)) {
         const savedTime = window._sessionWorkedLeads.get(l.id);
         const minutesSinceSave = (Date.now() - savedTime) / 60000;
@@ -1675,7 +1671,6 @@ function renderMyLeads() {
         }
       }
 
-      // 4. Callback Math
       let waitingForDate = false;
       let isDueCallback = false;
 
@@ -1693,15 +1688,11 @@ function renderMyLeads() {
 
       if (waitingForDate) return false;
 
-      // 5. Cool-Off Shield
       const inCoolOff = Graph.isInCoolOff(l);
       const passedCoolOff = isDueCallback ? true : !inCoolOff;
 
       if (!passedCoolOff) return false;
 
-      // ==========================================
-      // 🚀 THE TIMEZONE SHIELD
-      // ==========================================
       if (l.state) {
         let tz = "America/New_York";
         if (typeof stateTimezones !== "undefined" && stateTimezones[l.state]) {
@@ -1728,7 +1719,7 @@ function renderMyLeads() {
         const isAwake = localHour >= 8 && localHour < 20;
 
         if (!isAwake) {
-          hiddenByTimezone++; // 🎯 THE TRACKER: Catch the sleeping lead before it drops
+          hiddenByTimezone++;
           return false;
         }
       }
@@ -1774,14 +1765,6 @@ function renderMyLeads() {
     );
   });
 
-  console.log("--- QUEUE DIAGNOSTIC ---");
-  console.log(
-    `Total leads technically assigned to this agent in RAM: ${rawMyLeads.length}`,
-  );
-  if (hiddenByTimezone > 0)
-    console.log(`🌙 Sleeping Leads Caught: ${hiddenByTimezone}`);
-  console.log("------------------------");
-
   window._myLeads = myLeads;
   window._agentName = agentName;
   _leadSaved = false;
@@ -1804,7 +1787,7 @@ function renderMyLeads() {
   const subtitleEl = clone.getElementById("myleads-subtitle");
   const feedWrap = clone.getElementById("lead-feed-wrap");
 
-  // If the queue is empty, inject the empty state INTO the feed wrapper
+  // 🛑 1. EMPTY QUEUE STATE
   if (myLeads.length === 0 || _currentFeedIndex >= myLeads.length) {
     _currentFeedIndex = 0;
     if (window._clockTimer) clearInterval(window._clockTimer);
@@ -1812,7 +1795,6 @@ function renderMyLeads() {
     if (subtitleEl) subtitleEl.textContent = `// 0 remaining`;
 
     if (feedWrap) {
-      // 🎨 Dynamic HTML: Inject the banner ONLY if there are sleeping leads
       const sleepingBannerHTML =
         hiddenByTimezone > 0
           ? `<div style="background: var(--blue-light, #e0e7ff); color: var(--blue-dark, #3730a3); padding: 10px 16px; border-radius: 8px; display: inline-block; margin-bottom: 24px; font-size: 14px; font-weight: 600;">
@@ -1833,6 +1815,10 @@ function renderMyLeads() {
     }
 
     mainContent.appendChild(clone);
+
+    // 🚀 INJECT 1: Unmount the SMS console so it doesn't show the previous lead's texts!
+    if (typeof SMS !== "undefined") SMS.loadConversation(null);
+
     return;
   }
 
@@ -1848,7 +1834,14 @@ function renderMyLeads() {
     feedWrap.appendChild(renderLeadFeedCard(myLeads));
   }
 
+  // ⚠️ CRITICAL: The HTML must be appended to the DOM *before* we load the SMS console!
+  // `document.getElementById` will fail if the elements are still floating in the template clone.
   mainContent.appendChild(clone);
+
+  // 🚀 INJECT 2: Boot up the SMS thread for the active lead!
+  if (typeof SMS !== "undefined") {
+    SMS.loadConversation(myLeads[_currentFeedIndex]);
+  }
 
   updateClock();
   if (window._clockTimer) clearInterval(window._clockTimer);
