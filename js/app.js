@@ -3714,8 +3714,7 @@ const Automation = {
   // 1. Default Fallback Templates (Verizon & Frontier Bundle Pitch)
   defaults: {
     initial:
-      "Hi {FirstName}, this is {AgentName} with Verizon! As a Frontier Fiber customer, you can unlock an instant $15/mo off your Frontier bill by bundling Verizon mobile. Lines start at just $25/mo ($30 for a single line) + a FREE Verizon perk! Have a quick minute to check your savings?\n\nReply STOP to opt out.",
-
+      "Hi {FirstName}, this is Allie on behalf of Frontier by Verizon! Do you currently use AT&T, T-Mobile, Spectrum Mobile, Xfinity Mobile, Boost, Cricket, or another wireless provider? As a Frontier customer, you may qualify for Verizon plans as low as $30/line, special switcher promotions, and discounts on new phones.\nReply YES if you’d like to see what Verizon offers are available for your account.\n\nReply STOP to opt out.",
     followup:
       "Hi {FirstName}, following up on your Verizon & Frontier bundle savings! Don't leave that $15/mo Frontier bill discount and free Verizon perk on the table. Want me to run a quick quote for your mobile lines today?\n\nReply STOP to opt out.",
 
