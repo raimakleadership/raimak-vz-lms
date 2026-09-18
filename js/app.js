@@ -107,7 +107,9 @@ const SMS = {
   sendCurrentMessage: async function () {
     const input = document.getElementById("sms-input-box");
     const thread = document.getElementById("sms-message-thread");
-    const text = input.value.trim();
+
+    // 🛡️ Sanitize the text before it ever hits the database!
+    const text = this.sanitizeForGSM7(input.value.trim());
 
     if (!text || !this.currentLead) return;
 
@@ -204,6 +206,18 @@ const SMS = {
     const segments = Math.ceil(len / 160) || 1;
     counter.textContent = `${len} / 160 chars (${segments} SMS)`;
     counter.style.color = len > 160 ? "#f59e0b" : "#64748b";
+  },
+
+  // 🛡️ 6. THE GSM-7 SANITIZER: Prevents Unicode pricing spikes
+  sanitizeForGSM7: function (text) {
+    if (!text) return "";
+    return text
+      .replace(/[\u2018\u2019\u201A\u201B\u00B4\u0060]/g, "'") // Smart single quotes & backticks -> '
+      .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // Smart double quotes -> "
+      .replace(/[\u2013]/g, "-") // En dash -> -
+      .replace(/[\u2014]/g, "--") // Em dash -> --
+      .replace(/[\u2026]/g, "...") // Ellipsis -> ...
+      .replace(/[\u00A0]/g, " "); // Non-breaking space -> normal space
   },
 };
 // 🧠 SMS Triage Classifier
@@ -1325,10 +1339,49 @@ function startSalesFeedPolling() {
       // before they can trigger the Triage Inbox UI or bother the reps
       await processSilentTriage(State.leads);
 
+      // 🚀 4a. Silently redraw the active SMS thread (Dialer view)
       if (typeof SMS !== "undefined" && SMS.currentLead) {
         SMS.loadConversation(SMS.currentLead);
       }
-      // 4. Update sales ticker and dashboard UI
+
+      // 🚀 4b. Silently redraw the Admin Lead Modal chat (If it happens to be open!)
+      const modalOverlay = document.getElementById("modal-overlay");
+      const modalSmsContainer = document.getElementById("modal-sms-history");
+
+      if (
+        modalOverlay &&
+        modalOverlay.style.display === "flex" &&
+        modalSmsContainer &&
+        State.editingLeadId
+      ) {
+        const activeLead = State.leads.find(
+          (l) => l.id === State.editingLeadId,
+        );
+        if (activeLead && activeLead.cbr) {
+          Graph.getLeadMessages(activeLead.cbr).then((msgs) => {
+            if (msgs.length > 0) {
+              modalSmsContainer.innerHTML = msgs
+                .map((m) => {
+                  const isOut = m.direction === "Outbound";
+                  const color = isOut ? "#38bdf8" : "#00e676";
+                  const align = isOut ? "right" : "left";
+                  return `
+                  <div style="margin-bottom:8px; text-align:${align};">
+                    <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction} · ${m.status || "Sent"}</span><br>
+                    <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid ${color}; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
+                      ${escHtml(m.message)}
+                    </div>
+                  </div>
+                `;
+                })
+                .join("");
+              modalSmsContainer.scrollTop = modalSmsContainer.scrollHeight;
+            }
+          });
+        }
+      }
+
+      // 5. Update sales ticker and dashboard UI
       const newSales = Graph.getTodaySales(State.activityLog);
       State.todaySales = newSales;
 
@@ -3714,7 +3767,7 @@ const Automation = {
   // 1. Default Fallback Templates (Verizon & Frontier Bundle Pitch)
   defaults: {
     initial:
-      "Hi {FirstName}, this is Allie on behalf of Frontier by Verizon! Do you currently use AT&T, T-Mobile, Spectrum Mobile, Xfinity Mobile, Boost, Cricket, or another wireless provider? As a Frontier customer, you may qualify for Verizon plans as low as $30/line, special switcher promotions, and discounts on new phones.\nReply YES if you’d like to see what Verizon offers are available for your account.\n\nReply STOP to opt out.",
+      "Hi {FirstName}, this is Allie on behalf of Frontier by Verizon! Do you currently use AT&T, T-Mobile, Spectrum Mobile, Xfinity Mobile, Boost, Cricket, or another wireless provider? As a Frontier customer, you may qualify for Verizon plans as low as $30/line, special switcher promotions, and discounts on new phones.\nReply YES if you'd like to see what Verizon offers are available for your account.\n\nReply STOP to opt out.",
     followup:
       "Hi {FirstName}, following up on your Verizon & Frontier bundle savings! Don't leave that $15/mo Frontier bill discount and free Verizon perk on the table. Want me to run a quick quote for your mobile lines today?\n\nReply STOP to opt out.",
 
@@ -3972,7 +4025,7 @@ const Automation = {
       return alert("Template copy cannot be empty.");
     }
 
-    // 🚀 NEW: Grab the targeted post-message status
+    // 🚀 Grab the targeted post-message status
     const postStatusSelect = document.getElementById("auto-post-status");
     const targetStatus = postStatusSelect
       ? postStatusSelect.value
@@ -4019,14 +4072,20 @@ const Automation = {
       const agentName =
         (State.currentUser && State.currentUser.name) || "Your Verizon Rep";
 
-      const personalizedBody = templateText
-        .replace(
-          /{FirstName}/g,
-          lead.firstName || lead.name.split(" ")[0] || "there",
-        )
-        .replace(/{LastName}/g, lead.lastName || "")
-        .replace(/{BTN}/g, lead.btn || lead.BTN || lead.phone || "your account")
-        .replace(/{AgentName}/g, agentName);
+      // 🛡️ Sanitize to protect Twilio balance!
+      const personalizedBody = SMS.sanitizeForGSM7(
+        templateText
+          .replace(
+            /{FirstName}/g,
+            lead.firstName || lead.name.split(" ")[0] || "there",
+          )
+          .replace(/{LastName}/g, lead.lastName || "")
+          .replace(
+            /{BTN}/g,
+            lead.btn || lead.BTN || lead.phone || "your account",
+          )
+          .replace(/{AgentName}/g, agentName),
+      );
 
       if (launchBtn) {
         launchBtn.innerHTML = `<span>SENDING (${i + 1}/${selectedIds.length})...</span>`;
@@ -4041,7 +4100,7 @@ const Automation = {
 
         let statusLogAppend = "";
 
-        // 🚀 2. Execute the Status Change if requested
+        // 2. Execute the Status Change if requested
         if (targetStatus !== "no_change") {
           // Push to SharePoint
           await Graph.updateLead(lead.id, { Status: targetStatus });
@@ -4093,7 +4152,7 @@ const Automation = {
         );
       }
       this.selectedRecipients.clear();
-      this.filterAudience(); // This will auto-refresh the table so leads that changed status disappear if filtered!
+      this.filterAudience(); // Auto-refresh table
     } else {
       if (typeof UI !== "undefined" && UI.showToast) {
         UI.showToast(
@@ -6075,6 +6134,12 @@ function renderTriage() {
         <button class="btn btn-outline triage-btn" onclick="openLeadModal('${item.leadId}')" style="margin-right: auto; color: var(--text-2); border-color: #333;">
           View Profile
         </button>
+        
+        <!-- 🚀 NEW: The Handoff Button -->
+        <button class="btn triage-btn" style="background: transparent; color: #cbd5e1; border: 1px solid #475569;" onclick="copyLeadForTeams('${item.leadId}')">
+          Copy Info
+        </button>
+
         <button class="btn triage-btn btn-no" style="background: transparent; color: #ff3b30; border: 1px solid #ff3b30;" onclick="confirmTriageStatus(event, '${item.leadId}', 'NO')">
           Drop (NO)
         </button>
@@ -6248,6 +6313,46 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
   }
 }
 
+function copyLeadForTeams(leadId) {
+  const lead = State.leads.find((l) => l.id === leadId);
+  if (!lead) return;
+
+  const name = (lead.name || "UNKNOWN LEAD").toUpperCase();
+  const btn = String(lead.btn || lead.BTN || lead.phone || "N/A").replace(
+    /\D/g,
+    "",
+  );
+  const cbr = String(lead.cbr || lead.CBR || "N/A").replace(/\D/g, "");
+
+  // Format Address: "313 COLUMBIA DR, NORMAL IL 61761"
+  let addressStr = "";
+  if (lead.address) addressStr += lead.address.toUpperCase();
+  if (lead.city)
+    addressStr += (addressStr ? ", " : "") + lead.city.toUpperCase();
+  if (lead.state) addressStr += " " + lead.state.toUpperCase();
+  if (lead.zip) addressStr += " " + lead.zip;
+  if (!addressStr.trim()) addressStr = "NO ADDRESS ON FILE";
+
+  const textToCopy = `${name} - BTN ${btn} - CBR ${cbr} - ${addressStr}`;
+
+  navigator.clipboard
+    .writeText(textToCopy)
+    .then(() => {
+      if (typeof UI !== "undefined" && UI.showToast) {
+        UI.showToast("Lead copied for Teams!", "success");
+      } else {
+        alert("Lead copied for Teams!");
+      }
+    })
+    .catch((err) => {
+      console.error("Clipboard failed:", err);
+      if (typeof UI !== "undefined" && UI.showToast) {
+        UI.showToast("Clipboard access denied.", "error");
+      } else {
+        alert("Clipboard access denied.");
+      }
+    });
+}
 // ============================================================
 //  RAIMAK TEAM (Admin only)
 // ============================================================
@@ -7843,13 +7948,14 @@ function renderLeadModal(lead) {
                   const color = isOut ? "#38bdf8" : "#00e676";
                   const align = isOut ? "right" : "left";
                   return `
-                <div style="margin-bottom:8px; text-align:${align};">
-                  <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction}</span><br>
-                  <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid ${color}; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
-                    ${escHtml(m.message)}
+                  <div style="margin-bottom:8px; text-align:${align};">
+                    <!-- 🚀 THE FIX: Print the actual status next to the direction! -->
+                    <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction} · ${m.status || "Sent"}</span><br>
+                    <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid ${color}; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
+                      ${escHtml(m.message)}
+                    </div>
                   </div>
-                </div>
-              `;
+                `;
                 })
                 .join("");
               smsContainer.scrollTop = smsContainer.scrollHeight;
@@ -7904,6 +8010,63 @@ function renderLeadModal(lead) {
     } else {
       notesHistory.innerHTML = `<div style="font-size:12px;color:#64748b;margin-bottom:8px;font-style:italic;">No notes yet.</div>`;
     }
+  }
+
+  // 🚀 7.5. Inline SMS Sender Engine
+  const modalSmsInput = clone.getElementById("modal-sms-input");
+  const modalSmsSendBtn = clone.getElementById("modal-sms-send-btn");
+
+  if (modalSmsInput && modalSmsSendBtn && lead && lead.cbr) {
+    modalSmsSendBtn.onclick = async () => {
+      let text = modalSmsInput.value.trim();
+      if (!text) return;
+
+      // Pass it through the anti-unicode sanitizer
+      if (typeof SMS !== "undefined" && SMS.sanitizeForGSM7) {
+        text = SMS.sanitizeForGSM7(text);
+      }
+
+      modalSmsInput.value = "";
+      modalSmsInput.disabled = true;
+      modalSmsSendBtn.disabled = true;
+
+      // Optimistically push the bubble to the UI instantly
+      const liveSmsContainer = document.getElementById("modal-sms-history");
+      if (liveSmsContainer) {
+        liveSmsContainer.insertAdjacentHTML(
+          "beforeend",
+          `
+          <div style="margin-bottom:8px; text-align:right;">
+            <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">Outbound · Sending...</span><br>
+            <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid #38bdf8; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
+              ${escHtml(text)}
+            </div>
+          </div>
+        `,
+        );
+        liveSmsContainer.scrollTop = liveSmsContainer.scrollHeight;
+      }
+
+      try {
+        const cleanCBR = String(lead.cbr).replace(/\D/g, "").slice(-10);
+        await Graph.sendTextMessage(cleanCBR, text);
+        // The background poller will automatically flip "Sending..." to "Delivered" shortly after
+      } catch (err) {
+        console.error("Modal SMS Error:", err);
+        if (typeof UI !== "undefined" && UI.showToast)
+          UI.showToast("Failed to send text.", "error");
+      } finally {
+        modalSmsInput.disabled = false;
+        modalSmsSendBtn.disabled = false;
+        modalSmsInput.focus();
+      }
+    };
+  }
+
+  // 🚀 7.6. Copy for Teams Button
+  const copyBtn = clone.getElementById("modal-copy-teams-btn");
+  if (copyBtn && lead) {
+    copyBtn.onclick = () => copyLeadForTeams(lead.id);
   }
 
   // 8. Mount & Display

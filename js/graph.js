@@ -14,16 +14,12 @@ const Graph = (() => {
     /**
      * Delta Syncs the SMS History from SharePoint, caching it in IndexedDB and RAM.
      */
-    /**
-     * Delta Syncs the SMS History from SharePoint, caching it in IndexedDB and RAM.
-     */
     syncSMSHistory: async function (
       lastSyncDate = null,
       existingMessages = [],
     ) {
       await resolveSiteIds();
 
-      // 1. Load from IndexedDB if RAM is empty
       if (!existingMessages || existingMessages.length === 0) {
         if (typeof LocalDB !== "undefined" && LocalDB.getAllItems) {
           existingMessages = await LocalDB.getAllItems("sms_history");
@@ -37,17 +33,19 @@ const Graph = (() => {
         existingMessages.length === 0 ? null : lastSyncDate;
       const listId = Config.sharePoint.lists.smsHistory;
 
+      // 🚀 THE FIX 1: Add "Modified" to the $select string
       let url =
         base +
         "/sites/" +
         siteIds.team +
         "/lists/" +
         listId +
-        "/items?$expand=fields($select=Title,Direction,MessageBody,Agent,DeliveryStatus,Created)&$top=5000";
+        "/items?$expand=fields($select=Title,Direction,MessageBody,Agent,DeliveryStatus,Created,Modified)&$top=5000";
 
       if (effectiveSyncDate) {
         const safeDate = effectiveSyncDate.split(".")[0] + "Z";
-        url += `&$filter=fields/Created gt '${safeDate}'`;
+        // 🚀 THE FIX 2: Ask SharePoint for recently *Modified* items, not just recently Created!
+        url += `&$filter=fields/Modified gt '${safeDate}'`;
       }
 
       const raw = await getAllItems(url);
@@ -64,10 +62,12 @@ const Graph = (() => {
         agent: item.fields.Agent,
         status: item.fields.DeliveryStatus,
         timestamp: item.fields.Created,
+        modified:
+          item.fields.Modified ||
+          item.lastModifiedDateTime ||
+          item.fields.Created, // Track edits!
       }));
 
-      // 🚀 THE FIX: Use a Map to deduplicate by ID. This naturally overrides
-      // your local "Pending" texts with the "Delivered" texts from SharePoint!
       const msgMap = new Map();
       existingMessages.forEach((m) => msgMap.set(m.id, m));
       newMessages.forEach((m) => msgMap.set(m.id, m));
@@ -78,11 +78,12 @@ const Graph = (() => {
       );
 
       if (typeof LocalDB !== "undefined" && LocalDB.saveItems) {
-        await LocalDB.saveItems("sms_history", newMessages); // IndexedDB handles overwrites automatically via keyPath
+        await LocalDB.saveItems("sms_history", newMessages);
       }
 
+      // 🚀 THE FIX 3: Update the sync tracker timestamp using the new Modified date
       const validTimestamps = newMessages
-        .map((m) => new Date(m.timestamp).getTime())
+        .map((m) => new Date(m.modified).getTime())
         .filter((t) => !isNaN(t));
 
       let newLastSyncDate = lastSyncDate;
