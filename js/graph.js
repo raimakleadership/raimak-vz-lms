@@ -716,8 +716,13 @@ const Graph = (() => {
         f.Lead_x0020_Type || f.Type || f.Item_x0020_Type || f.LeadType || "",
       currentMRC:
         f.MonthlyRecurringCharge_x0028_MRC || f.CurrentMRC || f.MRC || "",
-      currentProducts: f.CurrentProducts || "",
-      autoPay: f.AutoPay || "",
+
+      // 🚀 NEW VERIZON FIELDS
+      currentProvider: f.CurrentProvider || "",
+      numberOfLines: f.NumberOfLines || "",
+      phoneStatus: f.PhoneStatus || "",
+      quotedAt: f.QuotedAt || "",
+
       previousAgents: f.PreviousAgents || "",
       // 💬 VERIZON & SMS FIELDS
       leadId: f.LeadID || "",

@@ -169,7 +169,9 @@ const SMS = {
       const d = new Date(msg.timestamp);
       timeStr = isNaN(d)
         ? ""
-        : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        : d.toLocaleDateString([], { month: "short", day: "numeric" }) +
+          " " +
+          d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
 
     const meta = isOut
@@ -274,12 +276,12 @@ async function processSilentTriage(leadsToCheck) {
     // 2. Determine if it's a hard rejection
     if (bucket === "NO") {
       updatePayload = {
-        Status: "Not Interested",
+        Status: "Do Not Call",
         SMSUnread: false,
       };
     } else if (bucket === "Do Not Contact") {
       updatePayload = {
-        Status: "Do Not Contact",
+        Status: "Do Not Call",
         SMSOptOut: true,
         SMSUnread: false,
       };
@@ -1365,9 +1367,27 @@ function startSalesFeedPolling() {
                   const isOut = m.direction === "Outbound";
                   const color = isOut ? "#38bdf8" : "#00e676";
                   const align = isOut ? "right" : "left";
+
+                  let dateStr = "";
+                  if (m.timestamp) {
+                    const d = new Date(m.timestamp);
+                    if (!isNaN(d)) {
+                      dateStr =
+                        d.toLocaleDateString([], {
+                          month: "short",
+                          day: "numeric",
+                        }) +
+                        " " +
+                        d.toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        });
+                    }
+                  }
+
                   return `
                   <div style="margin-bottom:8px; text-align:${align};">
-                    <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction} · ${m.status || "Sent"}</span><br>
+                    <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction} · ${m.status || "Sent"} ${dateStr ? "· " + dateStr : ""}</span><br>
                     <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid ${color}; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
                       ${escHtml(m.message)}
                     </div>
@@ -1375,7 +1395,14 @@ function startSalesFeedPolling() {
                 `;
                 })
                 .join("");
-              modalSmsContainer.scrollTop = modalSmsContainer.scrollHeight;
+
+              // Only scroll to bottom if the agent isn't manually scrolling up to read old history
+              if (
+                modalSmsContainer.scrollHeight - modalSmsContainer.scrollTop <=
+                modalSmsContainer.clientHeight + 50
+              ) {
+                modalSmsContainer.scrollTop = modalSmsContainer.scrollHeight;
+              }
             }
           });
         }
@@ -2120,9 +2147,15 @@ function renderLeadFeedCard(myLeads) {
   clone.getElementById("feed-meta-container").innerHTML = metaHtml;
 
   // Form Inputs
-  clone.getElementById("feed-btn").value = lead.btn || "";
-  clone.getElementById("feed-mrc").value = lead.currentMRC || "";
-  clone.getElementById("feed-cbr").value = lead.cbr || "";
+  clone.getElementById("feed-btn").value =
+    lead.btn || lead.BTN || lead.phone || "";
+  clone.getElementById("feed-cbr").value = lead.cbr || lead.CBR || "";
+  clone.getElementById("feed-mrc").value = lead.currentMRC || lead.mrc || "";
+
+  // 🚀 NEW: VZ Custom Inputs
+  clone.getElementById("feed-provider").value = lead.currentProvider || "";
+  clone.getElementById("feed-lines").value = lead.numberOfLines || "";
+  clone.getElementById("feed-quoted").value = lead.quotedAt || "";
 
   // ==========================================
   // 2. PULLING THE SAVED CALLBACK DATE UI
@@ -2210,16 +2243,6 @@ function renderLeadFeedCard(myLeads) {
     });
   }
 
-  // Products Dropdown
-  const productsSelect = clone.getElementById("feed-products");
-  Config.currentProducts.forEach((p) => {
-    const option = document.createElement("option");
-    option.value = p;
-    option.textContent = p;
-    if (lead.currentProducts === p) option.selected = true;
-    productsSelect.appendChild(option);
-  });
-
   // Sold By Dropdown
   const soldBySelect = clone.getElementById("feed-sold-by");
   State.contractors.forEach((c) => {
@@ -2231,16 +2254,18 @@ function renderLeadFeedCard(myLeads) {
 
   // THE DRAFT PEEK
   const draft = State.drafts[lead.id] || {};
-  const activeAutoPay =
-    draft.autoPay !== undefined ? draft.autoPay : lead.autoPay;
+  const activePhoneStatus =
+    draft.phoneStatus !== undefined ? draft.phoneStatus : lead.phoneStatus;
 
-  // AutoPay Radios
-  const autoPayContainer = clone.getElementById("feed-autopay-container");
-  ["ACH - Debit Card", "ACH - Credit Card", "No Auto Pay"].forEach((opt) => {
-    const isChecked = activeAutoPay === opt ? "checked" : "";
-    autoPayContainer.innerHTML += `
+  // 🚀 NEW: Phone Status Radios
+  const phoneStatusContainer = clone.getElementById(
+    "feed-phonestatus-container",
+  );
+  ["Paid Off", "Under Installments"].forEach((opt) => {
+    const isChecked = activePhoneStatus === opt ? "checked" : "";
+    phoneStatusContainer.innerHTML += `
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#1A2640;background:#F4F7FD;border:1px solid #D0DCF0;padding:8px 14px;border-radius:6px;">
-        <input type="radio" name="feed-autopay" value="${opt}" ${isChecked} style="accent-color:#2563B0"> ${opt}
+        <input type="radio" name="feed-phonestatus" value="${opt}" ${isChecked} style="accent-color:#2563B0"> ${opt}
       </label>`;
   });
 
@@ -2308,11 +2333,14 @@ function renderLeadFeedCard(myLeads) {
   // THE DRAFT MEMORY ENABLER
   const inputsToDraft = [
     { id: "feed-btn", key: "btn" },
-    { id: "feed-mrc", key: "mrc" },
     { id: "feed-cbr", key: "cbr" },
+    { id: "feed-mrc", key: "mrc" },
     { id: "feed-notes", key: "notes" },
-    { id: "feed-products", key: "products" },
     { id: "feed-sold-by", key: "soldBy" },
+    // 🚀 NEW: Draft bindings for the new inputs
+    { id: "feed-provider", key: "currentProvider" },
+    { id: "feed-lines", key: "numberOfLines" },
+    { id: "feed-quoted", key: "quotedAt" },
   ];
 
   inputsToDraft.forEach((item) => {
@@ -2328,11 +2356,14 @@ function renderLeadFeedCard(myLeads) {
     }
   });
 
-  const allAutoPayRadios = clone.querySelectorAll('input[name="feed-autopay"]');
-  if (allAutoPayRadios.length > 0) {
-    allAutoPayRadios.forEach((r) => {
+  // 🚀 NEW: Radio button listener for Phone Status
+  const allPhoneRadios = clone.querySelectorAll(
+    'input[name="feed-phonestatus"]',
+  );
+  if (allPhoneRadios.length > 0) {
+    allPhoneRadios.forEach((r) => {
       r.addEventListener("change", (e) =>
-        updateLeadDraft(lead.id, "autoPay", e.target.value),
+        updateLeadDraft(lead.id, "phoneStatus", e.target.value),
       );
     });
   }
@@ -2489,22 +2520,22 @@ async function agentSaveAll(leadId) {
 
   // 1. Grab UI Values
   const mrc = (document.getElementById("feed-mrc") || {}).value || "";
-  const productsSelectEl = document.getElementById("feed-products");
-  let products = "";
-  if (
-    productsSelectEl &&
-    productsSelectEl.options.length > 0 &&
-    productsSelectEl.selectedIndex !== -1
-  ) {
-    products = productsSelectEl.options[productsSelectEl.selectedIndex].value;
-  }
   const newNote = (document.getElementById("feed-notes") || {}).value || "";
   const cbr = (document.getElementById("feed-cbr") || {}).value || "";
   const btn = (document.getElementById("feed-btn") || {}).value || "";
-  const autoPayEl = document.querySelector(
-    'input[name="feed-autopay"]:checked',
+
+  // 🚀 NEW: Grab Verizon fields instead of Products/AutoPay
+  const currentProvider =
+    (document.getElementById("feed-provider") || {}).value || "";
+  const numberOfLines =
+    (document.getElementById("feed-lines") || {}).value || "";
+  const quotedAt = (document.getElementById("feed-quoted") || {}).value || "";
+
+  const phoneStatusEl = document.querySelector(
+    'input[name="feed-phonestatus"]:checked',
   );
-  const autoPay = autoPayEl ? autoPayEl.value : "";
+  const phoneStatus = phoneStatusEl ? phoneStatusEl.value : "";
+
   const soldByEl = document.getElementById("feed-sold-by");
   const soldByName = soldByEl ? soldByEl.value : "";
   let rawCallbackDate =
@@ -2520,12 +2551,8 @@ async function agentSaveAll(leadId) {
   // Validation (Terminal Bypass)
   const isTerminal = Config.terminalStatuses.includes(newStatus);
   if (!isTerminal) {
-    if (!autoPay) return UI.showToast("Select AutoPay", "error");
     if (newStatus === Config.soldStatus && !soldByName)
       return UI.showToast("Select Sold By", "error");
-    if (!mrc) return UI.showToast("Enter MRC", "error");
-    if (btn.replace(/\D/g, "").length !== 10)
-      return UI.showToast("Valid BTN required", "error");
   }
 
   // Note Stamping
@@ -2562,10 +2589,14 @@ async function agentSaveAll(leadId) {
   };
 
   if (mrc) saveFields["MonthlyRecurringCharge_x0028_MRC"] = mrc;
-  if (products) saveFields["CurrentProducts"] = products;
   if (cbr) saveFields["CBR"] = cbr;
   if (btn) saveFields["BTN"] = btn;
-  if (autoPay) saveFields["AutoPay"] = autoPay;
+
+  // 🚀 NEW: Payload append
+  if (currentProvider) saveFields["CurrentProvider"] = currentProvider;
+  if (numberOfLines) saveFields["NumberOfLines"] = numberOfLines;
+  if (quotedAt) saveFields["QuotedAt"] = quotedAt;
+  if (phoneStatus) saveFields["PhoneStatus"] = phoneStatus;
 
   saveFields["CallbackDateTime"] = rawCallbackDate
     ? new Date(rawCallbackDate).toISOString()
@@ -2611,10 +2642,15 @@ async function agentSaveAll(leadId) {
     lead.status = newStatus;
     lead.notes = notes;
     if (mrc) lead.currentMRC = mrc;
-    if (products) lead.currentProducts = products;
     if (cbr) lead.cbr = cbr;
     if (btn) lead.btn = btn;
-    if (autoPay) lead.autoPay = autoPay;
+
+    // 🚀 NEW: Update RAM Drafts
+    if (currentProvider) lead.currentProvider = currentProvider;
+    if (numberOfLines) lead.numberOfLines = numberOfLines;
+    if (quotedAt) lead.quotedAt = quotedAt;
+    if (phoneStatus) lead.phoneStatus = phoneStatus;
+
     lead.callbackAt = rawCallbackDate || null;
 
     Points.awardPoints(newStatus, leadId);
@@ -2632,14 +2668,12 @@ async function agentSaveAll(leadId) {
     // Update Save Button
     const saveBtn = document.getElementById("feed-save-btn");
     if (saveBtn) {
-      // 1. Trigger the Success State
       saveBtn.textContent = "Saved ✓";
       saveBtn.disabled = true;
       saveBtn.style.background = "var(--green, #10b981)";
       saveBtn.style.borderColor = "var(--green, #10b981)";
       saveBtn.style.cursor = "default";
 
-      // 2. The 2-Second Cooldown & Reset
       setTimeout(() => {
         saveBtn.textContent = "Save";
         saveBtn.disabled = false;
@@ -6140,13 +6174,13 @@ function renderTriage() {
           Copy Info
         </button>
 
-        <button class="btn triage-btn btn-no" style="background: transparent; color: #ff3b30; border: 1px solid #ff3b30;" onclick="confirmTriageStatus(event, '${item.leadId}', 'NO')">
+        <button class="btn triage-btn btn-no" style="background: transparent; color: #ff3b30; border: 1px solid #ff3b30;" onclick="confirmTriageStatus(event, '${item.leadId}', 'No')">
           Drop (NO)
         </button>
-        <button class="btn triage-btn btn-follow" style="background: #38bdf8; color: #0f172a; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Follow-up Scheduled')">
+        <button class="btn triage-btn btn-follow" style="background: #38bdf8; color: #0f172a; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Yes')">
           Follow-up
         </button>
-        <button class="btn triage-btn btn-yes" style="background: #00e676; color: #0a1a14; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Interested')">
+        <button class="btn triage-btn btn-yes" style="background: #00e676; color: #0a1a14; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Yes')">
           Verify YES
         </button>
       </div>
@@ -6171,11 +6205,12 @@ function getTriageInbox() {
       (c.name || "").toLowerCase().trim() === userName
     );
   });
+
   const agentName = contractor
     ? contractor.name.toLowerCase().trim()
     : userName;
 
-  // 1. Find leads that have an unread message AND belong to this rep
+  // 1. Filter: Leads with unread messages assigned to this rep
   const unreadLeads = (State.leads || []).filter((l) => {
     if (!l.SMSUnread && !l.smsUnread) return false;
 
@@ -6195,12 +6230,12 @@ function getTriageInbox() {
     return matchesAgent;
   });
 
-  // 2. Format them for the Triage UI Cards
+  // 2. Map: Format for the Triage UI Cards
   return unreadLeads.map((lead) => {
     let msgText =
       "New message received. Click 'View Profile' to read the chat.";
 
-    // 🚀 THE FIX: Dynamically pull the latest message from our offline SMS cache!
+    // Dynamically pull the latest message from offline SMS cache
     const rawPhone = lead.cbr || lead.phone || lead.BTN || lead.btn || "";
     const cleanPhone = String(rawPhone).replace(/\D/g, "");
 
@@ -6229,15 +6264,15 @@ function getTriageInbox() {
         if (newestInbound && newestInbound.message) {
           msgText = newestInbound.message;
         } else if (leadMessages[0].message) {
-          msgText = leadMessages[0].message; // Fallback to newest outbound if no inbound exists
+          msgText = leadMessages[0].message; // Fallback to newest outbound
         }
       }
     }
 
-    // 3. Run the actual message text through your custom AI classifier
+    // 3. AI Classifier
     const bucket = SMSBrain.classifyText(msgText);
 
-    // 4. Assign the dopamine colors
+    // 4. Apply Dopamine Colors
     let color = "#64748b"; // Default Gray
     if (bucket === "YES")
       color = "#00e676"; // Green
@@ -6257,8 +6292,31 @@ function getTriageInbox() {
 }
 // 🚀 Optimistic Handler for rapid-fire sorting
 async function confirmTriageStatus(event, leadId, bucketStatus) {
-  // 1. Instantly grab the parent card and trigger the slide-out animation
+  // 1. Instantly grab the DOM elements synchronously before we await anything
   const cardElement = event.currentTarget.closest(".triage-card");
+  const clickedBtn = event.currentTarget;
+
+  let wantsAutoReply = false;
+  const replyText =
+    "Fantastic, a Verizon Specialist will give you a call shortly!";
+
+  // 2. THE CUSTOM UI BLOCKER
+  if (bucketStatus === "Yes" || bucketStatus === "Pending Order") {
+    const userChoice = await promptTriageAutoReply();
+
+    // If they clicked Cancel, completely abort the function!
+    if (userChoice === null) return;
+
+    wantsAutoReply = userChoice;
+  }
+
+  // 3. Lock the button so they can't double-click it while Graph API saves
+  if (clickedBtn) {
+    clickedBtn.innerHTML = "Saving...";
+    clickedBtn.disabled = true;
+  }
+
+  // 4. Trigger the slide-out animation
   if (cardElement) {
     cardElement.classList.add("card-cleared");
 
@@ -6268,26 +6326,57 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
   }
 
   try {
-    // 2. Prepare the payload
+    const finalStatus = bucketStatus === "No" ? "Do Not Call" : bucketStatus;
+
+    // 5. Prepare the payload
     const updatePayload = {
-      Status: bucketStatus,
+      Status: finalStatus,
       SMSUnread: false,
     };
 
-    if (bucketStatus === "NO") {
-      updatePayload.Status = "Not Interested";
+    // 6. Fire the update to Graph silently in the background
+    await Graph.updateLead(leadId, updatePayload);
+
+    // 🚀 7. THE FIX: Update local RAM safely! DO NOT overwrite the object.
+    const lead = State.leads.find((l) => l.id === leadId);
+    if (lead) {
+      lead.status = finalStatus;
+      lead.SMSUnread = false;
+      lead.smsUnread = false; // Catch both casing styles just in case
     }
 
-    // 3. Fire the update to Graph silently in the background
-    const updatedLead = await Graph.updateLead(leadId, updatePayload);
+    // 8. FIRE THE AUTO-REPLY VIA TWILIO
+    if (wantsAutoReply && lead) {
+      // Safely check all possible phone fields
+      const rawPhone =
+        lead.cbr || lead.CBR || lead.phone || lead.btn || lead.BTN || "";
+      const cleanCBR = String(rawPhone).replace(/\D/g, "");
 
-    // 4. Update the local State RAM so the pipeline has the fresh data
-    const leadIndex = State.leads.findIndex((l) => l.id === leadId);
-    if (leadIndex > -1) {
-      State.leads[leadIndex] = updatedLead;
+      if (cleanCBR.length >= 10) {
+        const targetNumber = cleanCBR.slice(-10);
+        await Graph.sendTextMessage(targetNumber, replyText);
+
+        if (typeof Graph.logActivity === "function") {
+          await Graph.logActivity({
+            LeadID: lead.id,
+            Title: lead.name || "Unknown",
+            ActionType: "SMS: Triage Auto-Reply",
+            AgentEmail: State.currentUser ? State.currentUser.email : "",
+            Notes: `Sent YES auto-reply: "${replyText}"`,
+          });
+        }
+        if (typeof UI !== "undefined" && UI.showToast)
+          UI.showToast("Auto-reply sent!", "success");
+      } else {
+        if (typeof UI !== "undefined" && UI.showToast)
+          UI.showToast(
+            "Cannot send SMS: No valid cell phone on file.",
+            "error",
+          );
+      }
     }
 
-    // 5. Clean up the DOM node after the CSS animation finishes (350ms)
+    // 9. Clean up the DOM node after the CSS animation finishes (350ms)
     setTimeout(() => {
       if (cardElement && cardElement.parentNode) {
         cardElement.parentNode.removeChild(cardElement);
@@ -6298,19 +6387,74 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
         ".triage-card:not(.card-cleared)",
       );
       if (remainingCards.length === 0) {
-        document.getElementById("triage-empty").style.display = "block";
+        const emptyEl = document.getElementById("triage-empty");
+        if (emptyEl) emptyEl.style.display = "block";
       }
     }, 350);
   } catch (error) {
     console.error("Triage Error:", error);
-    UI.showToast("Failed to sync status. It will reappear shortly.", "error");
+    if (typeof UI !== "undefined" && UI.showToast)
+      UI.showToast("Failed to sync status. It will reappear shortly.", "error");
+
     // If it failed, remove the class so the card pops back in for them to retry
     if (cardElement) {
       cardElement.classList.remove("card-cleared");
       const badge = document.getElementById("triage-count-badge");
       if (badge) badge.textContent = parseInt(badge.textContent) + 1;
+
+      if (clickedBtn) {
+        clickedBtn.innerHTML = "Verify YES";
+        clickedBtn.disabled = false;
+      }
     }
   }
+}
+
+function promptTriageAutoReply() {
+  return new Promise((resolve) => {
+    // 1. Prevent duplicate overlays if they double-click
+    let overlay = document.getElementById("triage-autoreply-overlay");
+    if (overlay) overlay.remove();
+
+    // 2. Clone the template and mount it
+    const tmpl = document.getElementById("tmpl-triage-autoreply-modal");
+    if (!tmpl) {
+      console.error("Missing tmpl-triage-autoreply-modal");
+      return resolve(false); // Safety fallback
+    }
+
+    const clone = tmpl.content.cloneNode(true);
+    document.body.appendChild(clone);
+    overlay = document.getElementById("triage-autoreply-overlay");
+
+    // 3. Map the buttons
+    const btnCancel = document.getElementById("btn-triage-cancel");
+    const btnNoText = document.getElementById("btn-triage-no-text");
+    const btnSend = document.getElementById("btn-triage-send");
+
+    // 4. Cleanup function to wipe it from the DOM
+    const cleanup = () => {
+      if (overlay) overlay.remove();
+    };
+
+    // User aborts the entire action (Card stays in Triage)
+    btnCancel.onclick = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    // User wants to verify, but SKIP the text (Card clears, no SMS)
+    btnNoText.onclick = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    // User wants to verify AND fire the text (Card clears, SMS fires)
+    btnSend.onclick = () => {
+      cleanup();
+      resolve(true);
+    };
+  });
 }
 
 function copyLeadForTeams(leadId) {
@@ -7868,6 +8012,11 @@ function renderLeadModal(lead) {
   clone.getElementById("f-zip").value = safeVal(lead?.zip);
   clone.getElementById("f-mrc").value = safeVal(lead?.currentMRC);
 
+  // 🚀 NEW: Verizon Fields
+  clone.getElementById("f-provider").value = safeVal(lead?.currentProvider);
+  clone.getElementById("f-lines").value = safeVal(lead?.numberOfLines);
+  clone.getElementById("f-quoted").value = safeVal(lead?.quotedAt);
+
   if (lead && lead.lastContacted) {
     clone.getElementById("f-lastcontacted").value =
       lead.lastContacted.split("T")[0];
@@ -7913,28 +8062,26 @@ function renderLeadModal(lead) {
     });
   }
 
-  // 5. Build AutoPay Radios
-  const autopayContainer = clone.getElementById("f-autopay-container");
-  if (autopayContainer) {
-    ["ACH - Debit Card", "ACH - Credit Card", "No Auto Pay"].forEach((opt) => {
-      const isChecked = lead && lead.autoPay === opt ? "checked" : "";
-      autopayContainer.innerHTML += `
+  // 5. 🚀 NEW: Build Device Status Radios (Replaced AutoPay)
+  const phoneStatusContainer = clone.getElementById("f-phonestatus-container");
+  if (phoneStatusContainer) {
+    ["Paid Off", "Under Installments"].forEach((opt) => {
+      const isChecked = lead && lead.phoneStatus === opt ? "checked" : "";
+      phoneStatusContainer.innerHTML += `
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:#cbd5e1;">
-          <input type="radio" name="f-autopay" value="${opt}" ${isChecked} style="accent-color:#0ea5e9;width:13px;height:13px">
+          <input type="radio" name="f-phonestatus" value="${opt}" ${isChecked} style="accent-color:#0ea5e9;width:13px;height:13px">
           ${opt}
         </label>`;
     });
   }
 
-  // 6. 📱 ASYNC SMS HISTORY FETCH (The Fix is Here!)
+  // 6. 📱 ASYNC SMS HISTORY FETCH
   const smsContainer = clone.getElementById("modal-sms-history");
   if (smsContainer) {
     if (lead && lead.cbr) {
       const cleanPhone = String(lead.cbr).replace(/\D/g, "");
 
-      // If it's at least 10 digits (allowing for the +1 country code)
       if (cleanPhone.length >= 10) {
-        // Strip it down to exactly 10 digits for the database match
         const cbrToFetch = cleanPhone.slice(-10);
 
         Graph.getLeadMessages(cbrToFetch)
@@ -7947,10 +8094,27 @@ function renderLeadModal(lead) {
                   const isOut = m.direction === "Outbound";
                   const color = isOut ? "#38bdf8" : "#00e676";
                   const align = isOut ? "right" : "left";
+
+                  let dateStr = "";
+                  if (m.timestamp) {
+                    const d = new Date(m.timestamp);
+                    if (!isNaN(d)) {
+                      dateStr =
+                        d.toLocaleDateString([], {
+                          month: "short",
+                          day: "numeric",
+                        }) +
+                        " " +
+                        d.toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        });
+                    }
+                  }
+
                   return `
                   <div style="margin-bottom:8px; text-align:${align};">
-                    <!-- 🚀 THE FIX: Print the actual status next to the direction! -->
-                    <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction} · ${m.status || "Sent"}</span><br>
+                    <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">${m.direction} · ${m.status || "Sent"} ${dateStr ? "· " + dateStr : ""}</span><br>
                     <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid ${color}; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
                       ${escHtml(m.message)}
                     </div>
@@ -8012,7 +8176,7 @@ function renderLeadModal(lead) {
     }
   }
 
-  // 🚀 7.5. Inline SMS Sender Engine
+  // 7.5. Inline SMS Sender Engine
   const modalSmsInput = clone.getElementById("modal-sms-input");
   const modalSmsSendBtn = clone.getElementById("modal-sms-send-btn");
 
@@ -8021,7 +8185,6 @@ function renderLeadModal(lead) {
       let text = modalSmsInput.value.trim();
       if (!text) return;
 
-      // Pass it through the anti-unicode sanitizer
       if (typeof SMS !== "undefined" && SMS.sanitizeForGSM7) {
         text = SMS.sanitizeForGSM7(text);
       }
@@ -8030,14 +8193,19 @@ function renderLeadModal(lead) {
       modalSmsInput.disabled = true;
       modalSmsSendBtn.disabled = true;
 
-      // Optimistically push the bubble to the UI instantly
       const liveSmsContainer = document.getElementById("modal-sms-history");
       if (liveSmsContainer) {
+        const d = new Date();
+        const dateStr =
+          d.toLocaleDateString([], { month: "short", day: "numeric" }) +
+          " " +
+          d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
         liveSmsContainer.insertAdjacentHTML(
           "beforeend",
           `
           <div style="margin-bottom:8px; text-align:right;">
-            <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">Outbound · Sending...</span><br>
+            <span style="font-size:9px; color:#64748b; font-family:var(--font-mono); text-transform:uppercase;">Outbound · Sending... · ${dateStr}</span><br>
             <div style="display:inline-block; background:rgba(255,255,255,0.05); border-left:3px solid #38bdf8; padding:6px 10px; border-radius:4px; font-size:12px; color:#e2e8f0; text-align:left; max-width:85%;">
               ${escHtml(text)}
             </div>
@@ -8050,7 +8218,6 @@ function renderLeadModal(lead) {
       try {
         const cleanCBR = String(lead.cbr).replace(/\D/g, "").slice(-10);
         await Graph.sendTextMessage(cleanCBR, text);
-        // The background poller will automatically flip "Sending..." to "Delivered" shortly after
       } catch (err) {
         console.error("Modal SMS Error:", err);
         if (typeof UI !== "undefined" && UI.showToast)
@@ -8063,7 +8230,7 @@ function renderLeadModal(lead) {
     };
   }
 
-  // 🚀 7.6. Copy for Teams Button
+  // 7.6. Copy for Teams Button
   const copyBtn = clone.getElementById("modal-copy-teams-btn");
   if (copyBtn && lead) {
     copyBtn.onclick = () => copyLeadForTeams(lead.id);
