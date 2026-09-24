@@ -1266,7 +1266,7 @@ const Graph = (() => {
         lead.status !== "3rd Contact" &&
         isAssigned // 🚀 TWEAK: Only run the general recycle clock if an agent is holding it
       ) {
-        const daysSince = (now - new Date(ref)) / 86400000;
+        const daysSince = (now - new Date(ref)) / 8640000;
         if (daysSince > recycleAfterDays) flags.push("needs_recycle");
       }
 

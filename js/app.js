@@ -6113,28 +6113,71 @@ function exportReportCSV() {
 //  TRIAGE INBOX CONTROLLER
 // ============================================================
 
-function renderTriage() {
+window._currentTriageTab = window._currentTriageTab || "inbox";
+
+function renderTriage(tab = window._currentTriageTab) {
+  window._currentTriageTab = tab;
   State.currentView = "triage";
   const main = document.getElementById("main-content");
   const tmpl = document.getElementById("tmpl-triage-inbox");
 
+  // Re-build the DOM
   main.innerHTML = "";
   main.appendChild(tmpl.content.cloneNode(true));
+
+  // 1. Update Tab Underlines & Colors
+  const tabs = {
+    inbox: document.getElementById("tab-triage-inbox"),
+    yes: document.getElementById("tab-triage-yes"),
+    no: document.getElementById("tab-triage-no"),
+  };
+
+  Object.keys(tabs).forEach((key) => {
+    if (tabs[key]) {
+      if (key === tab) {
+        tabs[key].style.color = "#202020";
+        tabs[key].style.borderBottomColor = "#38bdf8";
+      } else {
+        tabs[key].style.color = "#64748b";
+        tabs[key].style.borderBottomColor = "transparent";
+      }
+    }
+  });
 
   const triageList = document.getElementById("triage-list");
   const emptyState = document.getElementById("triage-empty");
   const countBadge = document.getElementById("triage-count-badge");
 
-  // Fetch the unread queue (assuming getTriageInbox() returns our AI-sorted array)
-  const queue = getTriageInbox();
+  // 2. Always fetch Inbox data to update the top-right Unread counter accurately
+  const inboxQueue = getTriageInbox();
+  if (countBadge) {
+    countBadge.textContent = inboxQueue.length;
+  }
 
-  countBadge.textContent = queue.length;
+  // 3. Fetch the specific queue for the tab you clicked
+  let queue = [];
+  if (tab === "inbox") {
+    queue = inboxQueue;
+  } else if (tab === "yes") {
+    queue = getTriageSorted("Yes");
+  } else if (tab === "no") {
+    queue = getTriageSorted("Do Not Call");
+  }
 
+  // 4. Handle Empty State dynamically
   if (queue.length === 0) {
     emptyState.style.display = "block";
+    const emptyTitle = document.getElementById("triage-empty-title");
+    const emptyDesc = document.getElementById("triage-empty-desc");
+
+    if (tab !== "inbox" && emptyTitle && emptyDesc) {
+      emptyTitle.textContent = "No History";
+      emptyDesc.textContent = "No leads have been sorted into this bucket yet.";
+    }
     return;
   }
 
+  // 5. Render the Cards
   queue.forEach((item, index) => {
     const card = document.createElement("div");
     card.className = "card triage-card";
@@ -6148,6 +6191,31 @@ function renderTriage() {
       border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
     `;
 
+    // Always show View Profile and Copy Info
+    let actionButtons = `
+      <button class="btn btn-outline triage-btn" onclick="openLeadModal('${item.leadId}')" style="margin-right: auto; color: var(--text-2); border-color: #333;">
+        View Profile
+      </button>
+      <button class="btn triage-btn" style="background: transparent; color: #cbd5e1; border: 1px solid #475569;" onclick="copyLeadForTeams('${item.leadId}')">
+        Copy Info
+      </button>
+    `;
+
+    // Only inject the action buttons if we are actively sorting the Inbox!
+    if (tab === "inbox") {
+      actionButtons += `
+        <button class="btn triage-btn btn-no" style="background: transparent; color: #ff3b30; border: 1px solid #ff3b30;" onclick="confirmTriageStatus(event, '${item.leadId}', 'No')">
+          Drop (NO)
+        </button>
+        <button class="btn triage-btn btn-follow" style="background: #38bdf8; color: #0f172a; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Follow-up Scheduled')">
+          Follow-up
+        </button>
+        <button class="btn triage-btn btn-yes" style="background: #00e676; color: #0a1a14; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Yes')">
+          Verify YES
+        </button>
+      `;
+    }
+
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div style="flex: 1; padding-right: 16px;">
@@ -6160,29 +6228,12 @@ function renderTriage() {
           </div>
         </div>
         <div style="background: ${item.badgeColor}15; color: ${item.badgeColor}; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; border: 1px solid ${item.badgeColor}30; letter-spacing: 0.5px; white-space: nowrap;">
-          AI: ${item.suggestedBucket}
+          ${tab === "inbox" ? "AI: " : "STATUS: "} ${item.suggestedBucket}
         </div>
       </div>
       
       <div style="display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 16px; margin-top: 4px;">
-        <button class="btn btn-outline triage-btn" onclick="openLeadModal('${item.leadId}')" style="margin-right: auto; color: var(--text-2); border-color: #333;">
-          View Profile
-        </button>
-        
-        <!-- 🚀 NEW: The Handoff Button -->
-        <button class="btn triage-btn" style="background: transparent; color: #cbd5e1; border: 1px solid #475569;" onclick="copyLeadForTeams('${item.leadId}')">
-          Copy Info
-        </button>
-
-        <button class="btn triage-btn btn-no" style="background: transparent; color: #ff3b30; border: 1px solid #ff3b30;" onclick="confirmTriageStatus(event, '${item.leadId}', 'No')">
-          Drop (NO)
-        </button>
-        <button class="btn triage-btn btn-follow" style="background: #38bdf8; color: #0f172a; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Yes')">
-          Follow-up
-        </button>
-        <button class="btn triage-btn btn-yes" style="background: #00e676; color: #0a1a14; border: none;" onclick="confirmTriageStatus(event, '${item.leadId}', 'Yes')">
-          Verify YES
-        </button>
+        ${actionButtons}
       </div>
     `;
 
@@ -6496,6 +6547,88 @@ function copyLeadForTeams(leadId) {
         alert("Clipboard access denied.");
       }
     });
+}
+
+function getTriageSorted(targetStatus) {
+  const user = State.currentUser;
+  const userName = ((user && user.name) || "").toLowerCase().trim();
+  const userEmail = ((user && user.email) || "").toLowerCase().trim();
+
+  const contractor = (State.contractors || []).find((c) => {
+    return (
+      (c.email || "").toLowerCase().trim() === userEmail ||
+      (c.name || "").toLowerCase().trim() === userName
+    );
+  });
+  const agentName = contractor
+    ? contractor.name.toLowerCase().trim()
+    : userName;
+
+  // 1. Find leads that match the status and belong to this rep
+  const sortedLeads = (State.leads || []).filter((l) => {
+    if (l.status !== targetStatus) return false;
+
+    const assigned = (l.assignedTo || "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    return (
+      assigned &&
+      (assigned === agentName ||
+        assigned === userName ||
+        assigned === userEmail ||
+        assigned === "michael mcalpine jr.")
+    );
+  });
+
+  // Sort them so the ones most recently modified are at the top
+  sortedLeads.sort(
+    (a, b) => new Date(b.modified || 0) - new Date(a.modified || 0),
+  );
+
+  // 2. Format them for the Triage UI Cards
+  return sortedLeads.map((lead) => {
+    let msgText = lead.notes
+      ? lead.notes.split("\n")[0]
+      : "No recent notes on file.";
+
+    const rawPhone = lead.cbr || lead.phone || lead.BTN || lead.btn || "";
+    const cleanPhone = String(rawPhone).replace(/\D/g, "");
+
+    if (cleanPhone.length >= 10) {
+      const base10 = cleanPhone.slice(-10);
+      const allowedFormats = [
+        base10,
+        "+1" + base10,
+        "1" + base10,
+        `${base10.slice(0, 3)}-${base10.slice(3, 6)}-${base10.slice(6)}`,
+      ];
+
+      const leadMessages = (State.smsHistory || []).filter((m) =>
+        allowedFormats.includes(m.cbr),
+      );
+      if (leadMessages.length > 0) {
+        leadMessages.sort(
+          (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
+        );
+        const newestInbound = leadMessages.find(
+          (m) => m.direction === "Inbound",
+        );
+        if (newestInbound && newestInbound.message) {
+          msgText = newestInbound.message;
+        }
+      }
+    }
+
+    return {
+      leadId: lead.id,
+      name: lead.name || "Unknown Lead",
+      cbr: lead.cbr || lead.phone || "---",
+      message: msgText,
+      suggestedBucket: targetStatus.toUpperCase(),
+      badgeColor: targetStatus === "Yes" ? "#00e676" : "#ff3b30",
+    };
+  });
 }
 // ============================================================
 //  RAIMAK TEAM (Admin only)
