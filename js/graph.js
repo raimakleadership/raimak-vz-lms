@@ -1251,7 +1251,6 @@ const Graph = (() => {
           daysSince >= coolOffDays &&
           isAssigned
         ) {
-          flags.push("needs_recycle");
         }
       }
 
@@ -1265,14 +1264,13 @@ const Graph = (() => {
         !Config.terminalStatuses.includes(lead.status) &&
         lead.status !== "3rd Contact" &&
         isAssigned // 🚀 TWEAK: Only run the general recycle clock if an agent is holding it
-      ) {
-        const daysSince = (now - new Date(ref)) / 86400000;
-        if (daysSince > recycleAfterDays) flags.push("needs_recycle");
-      }
-
-      if (lead.assignedTo && agentCounts[lead.assignedTo] > maxLeadsPerAgent) {
-        flags.push("agent_overloaded");
-      }
+      )
+        if (
+          lead.assignedTo &&
+          agentCounts[lead.assignedTo] > maxLeadsPerAgent
+        ) {
+          flags.push("agent_overloaded");
+        }
 
       return Object.assign({}, lead, {
         flags: flags,

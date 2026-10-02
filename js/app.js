@@ -1646,22 +1646,18 @@ function getStatusDot(status) {
 
 let _leadSaved = false;
 let _currentFeedIndex = 0;
+window._currentMyLeadsTab = window._currentMyLeadsTab || null;
 
-function renderMyLeads() {
+function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (typeof _leadSaved === "undefined") window._leadSaved = false;
 
-  // ==========================================
-  // 🛑 THE SHRINKING ARRAY FIX
-  // ==========================================
-  if (!window._forceShowLead) {
+  if (!window._forceShowLead && tab === window._currentMyLeadsTab) {
     window._currentFeedIndex = 0;
   }
 
-  // 🕒 KEEPING THE CLOCK LOGIC AT THE TOP
   const updateClock = () => {
     const clockEl = document.getElementById("myleads-clock");
     if (!clockEl) return;
-
     const activeLead = (window._myLeads || [])[_currentFeedIndex];
     const leadState =
       activeLead && activeLead.state
@@ -1669,7 +1665,11 @@ function renderMyLeads() {
         : null;
 
     let tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (leadState && stateTimezones[leadState]) {
+    if (
+      leadState &&
+      typeof stateTimezones !== "undefined" &&
+      stateTimezones[leadState]
+    ) {
       tz = stateTimezones[leadState];
     }
     try {
@@ -1693,7 +1693,7 @@ function renderMyLeads() {
   const userName = ((user && user.name) || "").toLowerCase().trim();
   const userEmail = ((user && user.email) || "").toLowerCase().trim();
 
-  const contractor = State.contractors.find((c) => {
+  const contractor = (State.contractors || []).find((c) => {
     return (
       (c.email || "").toLowerCase().trim() === userEmail ||
       (c.name || "").toLowerCase().trim() === userName
@@ -1704,206 +1704,269 @@ function renderMyLeads() {
     : userName;
 
   // ==========================================
-  //  THE STRICT BOUNCER
+  // 🛑 1. BASE FILTER (Strips out Terminal, Skipped, Nighttime Leads)
   // ==========================================
-  let myLeads;
   let hiddenByTimezone = 0;
-
   const filterNow = new Date();
-  const filterTodayMidnight = new Date(filterNow);
-  filterTodayMidnight.setHours(0, 0, 0, 0);
-
   const tzHourCache = {};
 
-  if (window._forceShowLead && window._myLeads && window._myLeads.length > 0) {
-    myLeads = window._myLeads;
-  } else {
-    myLeads = State.leads.filter((l) => {
-      const assigned = (l.assignedTo || "")
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .trim();
-      const matchesAgent =
-        assigned &&
-        (assigned === agentName.replace(/\s+/g, " ") ||
-          assigned === userName.replace(/\s+/g, " ") ||
-          assigned === userEmail.replace(/\s+/g, " "));
-
-      if (!matchesAgent) return false;
-      if (Config.terminalStatuses.includes(l.status)) return false;
-      if (l.status === "3rd Contact") return false;
-
-      if (
-        window._skippedSessionLeads &&
-        window._skippedSessionLeads.includes(l.id)
-      ) {
-        return false;
-      }
-
-      if (window._sessionWorkedLeads && window._sessionWorkedLeads.has(l.id)) {
-        const savedTime = window._sessionWorkedLeads.get(l.id);
-        const minutesSinceSave = (Date.now() - savedTime) / 60000;
-
-        if (minutesSinceSave < 5) {
-          return false;
-        } else {
-          window._sessionWorkedLeads.delete(l.id);
-        }
-      }
-
-      let waitingForDate = false;
-      let isDueCallback = false;
-
-      if (l.callbackAt) {
-        const scheduledDate = new Date(l.callbackAt);
-        scheduledDate.setHours(0, 0, 0, 0);
-
-        if (l.status === "Pending Order") {
-          if (filterTodayMidnight <= scheduledDate) waitingForDate = true;
-        } else {
-          if (filterTodayMidnight < scheduledDate) waitingForDate = true;
-        }
-        if (!waitingForDate) isDueCallback = true;
-      }
-
-      if (waitingForDate) return false;
-
-      const inCoolOff = Graph.isInCoolOff(l);
-      const passedCoolOff = isDueCallback ? true : !inCoolOff;
-
-      if (!passedCoolOff) return false;
-
-      if (l.state) {
-        let tz = "America/New_York";
-        if (typeof stateTimezones !== "undefined" && stateTimezones[l.state]) {
-          tz = stateTimezones[l.state];
-        }
-
-        if (tzHourCache[tz] === undefined) {
-          try {
-            tzHourCache[tz] = parseInt(
-              new Intl.DateTimeFormat("en-US", {
-                hour: "numeric",
-                hour12: false,
-                timeZone: tz,
-              }).format(filterNow),
-              10,
-            );
-          } catch (e) {
-            console.warn("Timezone calculation failed for tz:", tz);
-            tzHourCache[tz] = 12;
-          }
-        }
-
-        const localHour = tzHourCache[tz];
-        const isAwake = localHour >= 8 && localHour < 20;
-
-        if (!isAwake) {
-          hiddenByTimezone++;
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    const statusPriority = {
-      "3rd Contact": 1,
-      "2nd Contact": 2,
-      "1st Contact": 3,
-    };
-
-    myLeads.sort((a, b) => {
-      const aIsCallback = !!a.callbackAt;
-      const bIsCallback = !!b.callbackAt;
-      if (aIsCallback && !bIsCallback) return -1;
-      if (!aIsCallback && bIsCallback) return 1;
-      if (aIsCallback && bIsCallback)
-        return new Date(a.callbackAt) - new Date(b.callbackAt);
-
-      const aWeight = statusPriority[a.status] || 4;
-      const bWeight = statusPriority[b.status] || 4;
-
-      if (aWeight !== bWeight) {
-        return aWeight - bWeight;
-      }
-
-      return a.id.localeCompare(b.id);
-    });
-  }
-
-  const rawMyLeads = State.leads.filter((l) => {
+  const baseLeads = State.leads.filter((l) => {
     const assigned = (l.assignedTo || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
       .trim();
-    return (
+    const matchesAgent =
       assigned &&
-      (assigned === agentName ||
-        assigned === userName ||
-        assigned === userEmail)
-    );
+      (assigned === agentName.replace(/\s+/g, " ") ||
+        assigned === userName.replace(/\s+/g, " ") ||
+        assigned === userEmail.replace(/\s+/g, " "));
+
+    if (!matchesAgent) return false;
+    if (Config.terminalStatuses.includes(l.status)) return false;
+    if (l.status === "3rd Contact") return false;
+
+    if (
+      window._skippedSessionLeads &&
+      window._skippedSessionLeads.includes(l.id)
+    )
+      return false;
+
+    // 5-minute manual save lock
+    if (window._sessionWorkedLeads && window._sessionWorkedLeads.has(l.id)) {
+      const savedTime = window._sessionWorkedLeads.get(l.id);
+      const minutesSinceSave = (Date.now() - savedTime) / 60000;
+      if (minutesSinceSave < 5) return false;
+      else window._sessionWorkedLeads.delete(l.id);
+    }
+
+    // Callbacks vs Cool-off
+    let waitingForDate = false;
+    let isDueCallback = false;
+
+    if (l.callbackAt) {
+      const scheduledTime = new Date(l.callbackAt).getTime();
+      const dueThreshold = filterNow.getTime() + 5 * 60000;
+      if (scheduledTime > dueThreshold) {
+        waitingForDate = true;
+      } else {
+        isDueCallback = true;
+      }
+    }
+
+    if (waitingForDate) return false; // Not due yet
+    if (!isDueCallback && Graph.isInCoolOff(l)) return false; // Strictly in cool-off
+
+    // Timezone Filter
+    if (l.state) {
+      let tz = "America/New_York";
+      if (typeof stateTimezones !== "undefined" && stateTimezones[l.state])
+        tz = stateTimezones[l.state];
+      if (tzHourCache[tz] === undefined) {
+        try {
+          tzHourCache[tz] = parseInt(
+            new Intl.DateTimeFormat("en-US", {
+              hour: "numeric",
+              hour12: false,
+              timeZone: tz,
+            }).format(filterNow),
+            10,
+          );
+        } catch (e) {
+          tzHourCache[tz] = 12;
+        }
+      }
+      const localHour = tzHourCache[tz];
+      if (localHour < 8 || localHour >= 20) {
+        hiddenByTimezone++;
+        return false;
+      }
+    }
+
+    return true;
   });
+
+  // ==========================================
+  // 🛑 2. BUCKET THE LEADS BY TAB LOGIC
+  // ==========================================
+  const buckets = {
+    callbacks: [],
+    yes: [],
+    followup: [],
+    new: [],
+  };
+
+  const fiveMinsFromNow = Date.now() + 5 * 60000;
+
+  baseLeads.forEach((l) => {
+    const isCallbackDue =
+      l.callbackAt && new Date(l.callbackAt).getTime() <= fiveMinsFromNow;
+    const isYes =
+      (l.status === "Yes" || l.status === "Interested") &&
+      (l.SMSUnread || l.smsUnread);
+    const isNew = l.status === "New";
+
+    if (isCallbackDue) {
+      buckets.callbacks.push(l);
+    } else if (isYes) {
+      buckets.yes.push(l);
+    } else if (isNew) {
+      buckets.new.push(l);
+    } else {
+      buckets.followup.push(l);
+    }
+  });
+
+  // Sort each bucket internally
+  buckets.callbacks.sort(
+    (a, b) => new Date(a.callbackAt) - new Date(b.callbackAt),
+  );
+  buckets.followup.sort((a, b) => {
+    const aTime = a.lastContacted ? new Date(a.lastContacted).getTime() : 0;
+    const bTime = b.lastContacted ? new Date(b.lastContacted).getTime() : 0;
+    return aTime - bTime; // Oldest wait time at the top
+  });
+  buckets.yes.sort((a, b) => a.id.localeCompare(b.id));
+  buckets.new.sort((a, b) => a.id.localeCompare(b.id));
+
+  // ==========================================
+  // 🛑 3. AUTO-SELECT BEST TAB IF NONE SELECTED
+  // ==========================================
+  if (!tab) {
+    if (buckets.callbacks.length > 0) tab = "callbacks";
+    else if (buckets.yes.length > 0) tab = "yes";
+    else if (buckets.followup.length > 0) tab = "followup";
+    else tab = "new";
+  }
+
+  window._currentMyLeadsTab = tab;
+  let myLeads = buckets[tab] || [];
 
   window._myLeads = myLeads;
   window._agentName = agentName;
   _leadSaved = false;
   window._forceShowLead = false;
 
-  // ==========================================
-  //  ☕ THE FINISH LINE (Preserving the UI)
-  // ==========================================
   const mainContent = document.getElementById("main-content");
   mainContent.innerHTML = "";
 
   const template = document.getElementById("tmpl-my-leads");
   const clone = template.content.cloneNode(true);
 
+  // Set the Top Badges
   const contactsToday =
     typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
   const textEl = clone.getElementById("myleads-contact-text");
   if (textEl) textEl.textContent = contactsToday;
 
+  // ==========================================
+  // 🚀 4. STYLE THE TABS & POPULATE BADGES
+  // ==========================================
+  const tabsUI = {
+    callbacks: clone.getElementById("tab-ml-callbacks"),
+    yes: clone.getElementById("tab-ml-yes"),
+    followup: clone.getElementById("tab-ml-followup"),
+    new: clone.getElementById("tab-ml-new"),
+  };
+
+  Object.keys(tabsUI).forEach((key) => {
+    if (tabsUI[key]) {
+      if (key === tab) {
+        tabsUI[key].style.color = "var(--text-1)";
+        tabsUI[key].style.borderBottomColor = "#38bdf8";
+      } else {
+        tabsUI[key].style.color = "var(--text-2)";
+        tabsUI[key].style.borderBottomColor = "transparent";
+      }
+    }
+  });
+
+  const updateBadge = (id, count) => {
+    const b = clone.getElementById(id);
+    if (b) {
+      b.textContent = count;
+      b.style.opacity = count > 0 ? "1" : "0.3"; // Dim empty buckets
+    }
+  };
+
+  updateBadge("badge-ml-callbacks", buckets.callbacks.length);
+  updateBadge("badge-ml-yes", buckets.yes.length);
+  updateBadge("badge-ml-followup", buckets.followup.length);
+  updateBadge("badge-ml-new", buckets.new.length);
+
+  // ==========================================
+  // 🛑 5. EMPTY QUEUE STATE FOR TAB
+  // ==========================================
   const subtitleEl = clone.getElementById("myleads-subtitle");
   const feedWrap = clone.getElementById("lead-feed-wrap");
 
-  // 🛑 1. EMPTY QUEUE STATE
   if (myLeads.length === 0 || _currentFeedIndex >= myLeads.length) {
     _currentFeedIndex = 0;
     if (window._clockTimer) clearInterval(window._clockTimer);
 
-    if (subtitleEl) subtitleEl.textContent = `// 0 remaining`;
+    if (subtitleEl) subtitleEl.textContent = `// 0 remaining in this tab`;
 
     if (feedWrap) {
       const sleepingBannerHTML =
         hiddenByTimezone > 0
           ? `<div style="background: var(--blue-light, #e0e7ff); color: var(--blue-dark, #3730a3); padding: 10px 16px; border-radius: 8px; display: inline-block; margin-bottom: 24px; font-size: 14px; font-weight: 600;">
-             🌙 ${hiddenByTimezone} lead${hiddenByTimezone !== 1 ? "s" : ""} resting outside 8 AM - 8 PM dialing hours.
-           </div><br>`
+              🌙 ${hiddenByTimezone} lead${hiddenByTimezone !== 1 ? "s" : ""} resting outside 8 AM - 8 PM dialing hours.
+            </div><br>`
           : ``;
 
       feedWrap.innerHTML = `
         <div class="card" style="text-align:center; padding:60px 20px;">
           <div style="font-size:4rem; margin-bottom:20px;">☕</div>
-          <h2 class="view-title">Queue Clear!</h2>
-          <p style="color:var(--text-3); margin-bottom:${hiddenByTimezone > 0 ? "16px" : "24px"};">Worked everything available for now.</p>
-          
+          <h2 class="view-title">Tab Clear!</h2>
+          <p style="color:var(--text-3); margin-bottom:${hiddenByTimezone > 0 ? "16px" : "24px"};">No leads currently require action in this bucket.</p>
           ${sleepingBannerHTML}
-
           <button class="btn-primary" onclick="this.innerHTML='Syncing...'; this.disabled=true; typeof loadAllData === 'function' ? loadAllData() : window.location.reload();">Check for Updates</button>
         </div>`;
     }
 
     mainContent.appendChild(clone);
-
-    // 🚀 INJECT 1: Unmount the SMS console so it doesn't show the previous lead's texts!
     if (typeof SMS !== "undefined") SMS.loadConversation(null);
-
     return;
   }
 
   // ==========================================
-  //  THE RENDER LOGIC (If there are leads)
+  // 🚀 6. DYNAMIC QUICK REPLIES INJECTOR
+  // ==========================================
+  const activeLead = myLeads[_currentFeedIndex];
+  const qrContainer = clone.getElementById("sms-quick-reply-container");
+
+  if (qrContainer && typeof Config !== "undefined" && Config.smsTemplates) {
+    Object.keys(Config.smsTemplates).forEach((key) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-ghost-sm";
+      btn.style.cssText =
+        "background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32; transition: all 0.2s;";
+      btn.textContent = "+ " + key.charAt(0).toUpperCase() + key.slice(1);
+
+      btn.onclick = () => {
+        if (typeof SMS !== "undefined" && SMS.insertQuickReply) {
+          let txt = Config.smsTemplates[key];
+          if (activeLead) {
+            const cleanName =
+              activeLead.firstName ||
+              (activeLead.name ? activeLead.name.split(" ")[0] : "there");
+            const cleanAgent =
+              window._agentName.split(" ")[0] || "your Verizon specialist";
+            const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
+
+            txt = txt.replace(/{FirstName}/gi, cleanName);
+            txt = txt.replace(/{AgentName}/gi, cleanAgent);
+            txt = txt.replace(/{BTN}/gi, cleanBTN);
+          }
+          SMS.insertQuickReply(txt);
+        }
+      };
+      qrContainer.appendChild(btn);
+    });
+  }
+
+  // ==========================================
+  //  7. THE RENDER LOGIC
   // ==========================================
   if (subtitleEl) {
     subtitleEl.textContent = `// ${myLeads.length} remaining · lead ${_currentFeedIndex + 1} of ${myLeads.length}`;
@@ -1914,13 +1977,10 @@ function renderMyLeads() {
     feedWrap.appendChild(renderLeadFeedCard(myLeads));
   }
 
-  // ⚠️ CRITICAL: The HTML must be appended to the DOM *before* we load the SMS console!
-  // `document.getElementById` will fail if the elements are still floating in the template clone.
   mainContent.appendChild(clone);
 
-  // 🚀 INJECT 2: Boot up the SMS thread for the active lead!
   if (typeof SMS !== "undefined") {
-    SMS.loadConversation(myLeads[_currentFeedIndex]);
+    SMS.loadConversation(activeLead);
   }
 
   updateClock();
@@ -2108,7 +2168,7 @@ function renderLeadFeedCard(myLeads) {
   }
 
   // ==========================================
-  // 1. THE CALLBACK / INSTALL ALERT BADGE
+  // 1. THE CALLBACK ALERT BADGE
   // ==========================================
   const callbackAlert = clone.getElementById("feed-callback-alert");
   if (callbackAlert && lead.callbackAt) {
@@ -2126,12 +2186,8 @@ function renderLeadFeedCard(myLeads) {
         minute: "2-digit",
       });
 
-      if (lead.status === "Pending Order") {
-        callbackAlert.innerHTML =
-          "📅 INSTALL DUE: Check if fiber is active today!";
-      } else {
-        callbackAlert.innerHTML = `📅 ACTION REQUIRED: Scheduled follow-up today at ${timeString}`;
-      }
+      // Removed "Pending Order" install check
+      callbackAlert.innerHTML = `📅 ACTION REQUIRED: Scheduled follow-up today at ${timeString}`;
       callbackAlert.style.display = "block";
     }
   }
@@ -2179,16 +2235,6 @@ function renderLeadFeedCard(myLeads) {
       callbackWrap.style.opacity = "1";
       callbackWrap.style.overflow = "visible";
       callbackWrap.dataset.manuallyOpened = "false";
-    }
-
-    if (lead.status === "Pending Order" && callbackBtn) {
-      if (callbackLabel)
-        callbackLabel.innerHTML =
-          'Scheduled Install <span style="color: var(--red)">*</span>';
-      callbackBtn.disabled = true;
-      callbackBtn.style.opacity = "0.4";
-      callbackBtn.style.cursor = "not-allowed";
-      callbackInput.required = true;
     }
   }
 
@@ -2428,40 +2474,24 @@ function updateCallbackUIForStatus(status) {
 
   if (!wrap || !label || !btn || !dateInput) return;
 
-  if (status === "Pending Order") {
-    // Force the menu open instantly and lock the button
-    wrap.style.width = "200px";
-    wrap.style.opacity = "1";
-    wrap.style.overflow = "visible";
+  // Standard callback mode for all Verizon statuses
+  label.textContent = "Callback date and time";
+  btn.disabled = false;
+  btn.style.opacity = "1";
+  btn.style.cursor = "pointer";
+  dateInput.required = false;
 
-    label.innerHTML =
-      'Scheduled Install <span style="color: var(--red)">*</span>';
-    btn.disabled = true;
-    btn.style.opacity = "0.4";
-    btn.style.cursor = "not-allowed";
-    dateInput.required = true;
-  } else {
-    // Return everything to normal callback mode
-    label.textContent = "Callback date and time";
-    btn.disabled = false;
-    btn.style.opacity = "1";
-    btn.style.cursor = "pointer";
-    dateInput.required = false;
+  // Check memory! If they didn't manually open it before, slide it shut.
+  if (wrap.dataset.manuallyOpened !== "true") {
+    wrap.style.width = "0px";
+    wrap.style.opacity = "0";
+    wrap.style.overflow = "hidden";
 
-    // THE FIX: Check the memory! If they didn't manually open it before, slide it shut.
-    if (wrap.dataset.manuallyOpened !== "true") {
-      wrap.style.width = "0px";
-      wrap.style.opacity = "0";
-      wrap.style.overflow = "hidden";
-
-      // Wait for the slide animation to finish before clearing the data
-      setTimeout(() => {
-        if (wrap.style.width === "0px") dateInput.value = "";
-      }, 300);
-    }
+    setTimeout(() => {
+      if (wrap.style.width === "0px") dateInput.value = "";
+    }, 300);
   }
 }
-
 function stageStatus(leadId, newStatus) {
   const lead = State.leads.find(function (l) {
     return l.id === leadId;
@@ -3798,36 +3828,22 @@ const Automation = {
   selectedRecipients: new Set(),
   currentTemplateKey: "initial",
 
-  // 1. Default Fallback Templates (Verizon & Frontier Bundle Pitch)
-  defaults: {
-    initial:
-      "Hi {FirstName}, this is Allie on behalf of Frontier by Verizon! Do you currently use AT&T, T-Mobile, Spectrum Mobile, Xfinity Mobile, Boost, Cricket, or another wireless provider? As a Frontier customer, you may qualify for Verizon plans as low as $30/line, special switcher promotions, and discounts on new phones.\nReply YES if you'd like to see what Verizon offers are available for your account.\n\nReply STOP to opt out.",
-    followup:
-      "Hi {FirstName}, following up on your Verizon & Frontier bundle savings! Don't leave that $15/mo Frontier bill discount and free Verizon perk on the table. Want me to run a quick quote for your mobile lines today?\n\nReply STOP to opt out.",
-
-    scheduling:
-      "Hi {FirstName}, this is {AgentName} with Verizon. I have a few open slots this week to get your Verizon mobile lines activated and lock in your $15/mo Frontier discount. Does morning or afternoon work better for a quick call?\n\nReply STOP to opt out.",
-
-    closing:
-      "Thank you for bundling with Verizon, {FirstName}! Your mobile plan and $15/mo Frontier Fiber discount are locked in. If you ever have questions about your account ({BTN}), feel free to text this number back!\n\nReply STOP to opt out.",
-  },
-
-  // 2. Storage Helper
+  // 1. Storage Helper (Now pulls defaults centrally from Config)
   getTemplates() {
     const saved = localStorage.getItem("RaimakSMSTemplates");
     return saved
-      ? { ...this.defaults, ...JSON.parse(saved) }
-      : { ...this.defaults };
+      ? { ...Config.smsTemplates, ...JSON.parse(saved) }
+      : { ...Config.smsTemplates };
   },
 
-  // 3. Load Selected Preset into Editor
+  // 2. Load Selected Preset into Editor
   loadTemplate(key) {
     this.currentTemplateKey = key || "initial";
     const templates = this.getTemplates();
     const textarea = document.getElementById("auto-template-body");
     if (textarea) {
       textarea.value = templates[this.currentTemplateKey] || "";
-      this.updatePreview();
+      if (typeof this.updatePreview === "function") this.updatePreview();
     }
   },
 

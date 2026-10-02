@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Raimak Lead Management System" />
-    <title>Raimak LMS</title>
+    <title>VZ LMS</title>
     <link rel="stylesheet" href="css/style.css?v=3.0" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -654,7 +654,7 @@
       </section>
     </template>
     
- <template id="tmpl-my-leads">
+    <template id="tmpl-my-leads">
       <div class="view-header">
         <div>
           <h1 class="view-title">My Leads // SMS Console</h1>
@@ -662,10 +662,7 @@
         </div>
 
         <div style="display: flex; gap: 12px; align-items: center">
-          <div
-            class="contacts-today-badge"
-            style="background: var(--surface-2); color: var(--text-1)"
-          >
+          <div class="contacts-today-badge" style="background: var(--surface-2); color: var(--text-1)">
             <style>
               .viz-clock {
                 background: linear-gradient(145deg, #111827, #1e293b);
@@ -679,7 +676,6 @@
                 height: 54px; 
                 box-sizing: border-box;
               }
-
               .viz-clock-icon {
                 background: rgba(237, 28, 36, 0.15);
                 border: 1px solid rgba(237, 28, 36, 0.5);
@@ -719,7 +715,6 @@
                 height: 54px; 
                 box-sizing: border-box;
               }
-
               .viz-card::before {
                 content: '';
                 position: absolute;
@@ -728,13 +723,11 @@
                 transform: skewX(-20deg);
                 animation: viz-sweep 5s infinite cubic-bezier(0.4, 0, 0.2, 1);
               }
-
               @keyframes viz-sweep {
                 0% { left: -100%; }
                 20% { left: 200%; }
                 100% { left: 200%; }
               }
-
               .viz-icon {
                 background: rgba(237, 28, 36, 0.15);
                 border: 1px solid rgba(237, 28, 36, 0.5);
@@ -762,16 +755,20 @@
         </div>
       </div>
 
-      <div
-        class="alert alert-info"
-        id="myleads-limit-alert"
-        style="display: none"
-      >
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
-          <line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          <line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        </svg>
+      <!-- 🚀 NEW: The 4-Tier Navigation Tabs -->
+      <div style="display: flex; gap: 24px; margin-top: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 0; overflow-x: auto;">
+        <div id="tab-ml-callbacks" onclick="renderMyLeads('callbacks')" style="color: var(--text-2); font-weight: 600; cursor: pointer; padding-bottom: 12px; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap;">
+          Callbacks <span id="badge-ml-callbacks" style="background: #ed1c24; color: #f8fafc; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">0</span>
+        </div>
+        <div id="tab-ml-yes" onclick="renderMyLeads('yes')" style="color: var(--text-2); font-weight: 600; cursor: pointer; padding-bottom: 12px; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap;">
+          Unread & YES <span id="badge-ml-yes" style="background: #00e676; color: #0a1a14; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">0</span>
+        </div>
+        <div id="tab-ml-followup" onclick="renderMyLeads('followup')" style="color: var(--text-2); font-weight: 600; cursor: pointer; padding-bottom: 12px; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap;">
+          Follow-ups <span id="badge-ml-followup" style="background: #38bdf8; color: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">0</span>
+        </div>
+        <div id="tab-ml-new" onclick="renderMyLeads('new')" style="color: var(--text-2); font-weight: 600; cursor: pointer; padding-bottom: 12px; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap;">
+          New Leads <span id="badge-ml-new" style="background: var(--surface-2); color: var(--text-1); padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px; border: 1px solid var(--border);">0</span>
+        </div>
       </div>
 
       <!-- Active Lead Feed Card Mount -->
@@ -779,7 +776,6 @@
 
       <!-- 💬 LIVE SMS CONVERSATION CONSOLE -->
       <div class="card" id="sms-console-card" style="margin-top: 20px; border: 1px solid var(--border-hi);">
-        
         <!-- SMS Header Bar -->
         <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background: #0c0c0e;">
           <div style="display:flex; align-items:center; gap:12px;">
@@ -796,33 +792,22 @@
           </div>
         </div>
 
-        <!-- 🛑 COMPLIANCE OPT-OUT WARNING (Hidden by default) -->
         <div id="sms-optout-banner" style="display: none; background: rgba(255, 59, 48, 0.15); border-bottom: 1px solid rgba(255, 59, 48, 0.4); padding: 10px 20px; color: #ff3b30; font-weight: bold; font-size: 13px; align-items: center; gap: 8px;">
           <span>🛑 OPT-OUT CIRCUIT BREAKER: Customer replied STOP. Outbound messaging is disabled.</span>
         </div>
 
-        <!-- Chat Bubble Thread Area -->
         <div id="sms-message-thread" style="padding: 20px; height: 280px; overflow-y: auto; background: #0a0a0c; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--border);">
           <div style="text-align: center; color: #475569; font-size: 13px; margin: auto;">
             No conversation history selected. Click a lead from the list below to view messages.
           </div>
         </div>
 
-        <!-- Quick Reply Pill Templates -->
-        <div style="padding: 10px 20px; background: #121216; border-bottom: 1px solid var(--border); display: flex; gap: 8px; overflow-x: auto; align-items: center;">
+        <!-- 🚀 NEW: Dynamic Quick Reply Pill Templates -->
+        <div id="sms-quick-reply-container" style="padding: 10px 20px; background: #121216; border-bottom: 1px solid var(--border); display: flex; gap: 8px; overflow-x: auto; align-items: center;">
           <span style="font-family: var(--font-mono, monospace); font-size: 10px; color: #64748b; text-transform: uppercase; white-space: nowrap; font-weight: 700;">Quick Replies:</span>
-          <button type="button" class="btn-ghost-sm" style="background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32;" onclick="SMS.insertQuickReply('Hi! Following up on your Frontier Fiber interest. Do you have a quick minute?')">
-            + Intro Follow-Up
-          </button>
-          <button type="button" class="btn-ghost-sm" style="background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32;" onclick="SMS.insertQuickReply('We have availability for a technician installation this week. Does morning or afternoon work better?')">
-            + Install Scheduling
-          </button>
-          <button type="button" class="btn-ghost-sm" style="background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32;" onclick="SMS.insertQuickReply('Thank you! If you ever have questions about your service, feel free to text this number back.')">
-            + Closing Thank You
-          </button>
+          <!-- JavaScript will dynamically inject the templates from config.js here -->
         </div>
 
-        <!-- SMS Outbound Composer -->
         <div style="padding: 16px 20px; background: #0c0c0e;">
           <div style="display: flex; gap: 12px; align-items: flex-end;">
             <div style="flex: 1;">
@@ -862,14 +847,8 @@
               <h2 class="card-title">Lead Messaging Queue</h2>
               <span class="card-meta">Select any lead to load their Twilio conversation</span>
             </div>
-            
             <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; cursor:pointer; color:#0D1B3E; margin:0;">
-              <input 
-                type="checkbox" 
-                id="toggle-search-all" 
-                style="cursor:pointer; margin:0; width:14px; height:14px;"
-                onchange="searchMyLeads(document.getElementById('my-leads-search').value)"
-              >
+              <input type="checkbox" id="toggle-search-all" style="cursor:pointer; margin:0; width:14px; height:14px;" onchange="searchMyLeads(document.getElementById('my-leads-search').value)">
               Search All Agents
             </label>
           </div>
@@ -880,13 +859,7 @@
                 <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2" />
                 <line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
-              <input
-                type="text"
-                class="search-input"
-                placeholder="Search by name, phone number, or SMS text..."
-                oninput="searchMyLeads(this.value)"
-                id="my-leads-search"
-              />
+              <input type="text" class="search-input" placeholder="Search by name, phone number, or SMS text..." oninput="searchMyLeads(this.value)" id="my-leads-search" />
             </div>
           </div>
           <div id="my-leads-table"></div>

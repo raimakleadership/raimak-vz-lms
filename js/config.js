@@ -105,4 +105,16 @@ const Config = {
   scopes: ["Sites.ReadWrite.All", "User.Read"],
 
   salesFeedInterval: 45000,
+
+  // 📱 Verizon Quick Message Templates
+  smsTemplates: {
+    initial:
+      "Hi {FirstName}, this is {AgentName} on behalf of Frontier by Verizon! Do you currently use AT&T, T-Mobile, Spectrum Mobile, Xfinity Mobile, Boost, Cricket, or another wireless provider? As a Frontier customer, you may qualify for Verizon plans as low as $30/line, special switcher promotions, and discounts on new phones.\nReply YES if you'd like to see what Verizon offers are available for your account.\n\nReply STOP to opt out.",
+    followup:
+      "Hi {FirstName}, following up on your Verizon & Frontier bundle savings! Don't leave that $15/mo Frontier bill discount and free Verizon perk on the table. Want me to run a quick quote for your mobile lines today?\n\nReply STOP to opt out.",
+    scheduling:
+      "Hi {FirstName}, this is {AgentName} with Verizon. I have a few open slots this week to get your Verizon mobile lines activated and lock in your $15/mo Frontier discount. Does morning or afternoon work better for a quick call?\n\nReply STOP to opt out.",
+    closing:
+      "Thank you for bundling with Verizon, {FirstName}! Your mobile plan and $15/mo Frontier Fiber discount are locked in. If you ever have questions about your account ({BTN}), feel free to text this number back!\n\nReply STOP to opt out.",
+  },
 };
