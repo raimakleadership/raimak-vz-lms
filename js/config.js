@@ -90,17 +90,19 @@ const Config = {
 
   roles: {
     admins: [
+      "m.mcalpine@raimak.com",
       "RichardZacker@raimak.com",
       "B.Hinesley@raimak.com",
       "S.Balleste@raimak.com",
       "N.Caldwell@raimak.com",
       "C.Scarrett@raimak.com",
-      "m.mcalpine@raimak.com",
       "J.Scroggins@raimak.com",
       "antoinette.bickel@raimak.com",
       "a.cooper@raimak.com",
     ],
   },
+
+  contractorDomains: ["@buyfibernow.com"],
 
   scopes: ["Sites.ReadWrite.All", "User.Read"],
 

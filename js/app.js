@@ -658,6 +658,11 @@ function isAdmin() {
   return State.role === "admin";
 }
 
+function isContractorUser() {
+  const email = State.currentUser.email.toLowerCase();
+  return Config.contractorDomains.some((d) => email.includes(d));
+}
+
 function detectRole(user) {
   if (!user) return "agent";
   const email = (user.email || "").toLowerCase();
@@ -974,88 +979,8 @@ function renderDashboard() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
 
-  // ==========================================
-  //  THE NEW RENDER LOGIC
-  // ==========================================
-  const mainContent = document.getElementById("main-content");
-  mainContent.innerHTML = "";
-
-  // 1. Clone the HTML blueprint
-  const template = document.getElementById("tmpl-dashboard");
-  const clone = template.content.cloneNode(true);
-
-  // 2. Handle Admin Security
-  if (!isAdmin()) {
-    clone.querySelectorAll(".admin-only").forEach((el) => el.remove());
-  }
-
-  // 3. Populate Header & KPIs
-  clone.getElementById("dash-subtitle").textContent =
-    `${isAdmin() ? "// ADMIN VIEW" : "// AGENT VIEW"} · v${Config.rules.appVersion}`;
-  clone.getElementById("kpi-total").textContent = total;
-  clone.getElementById("kpi-active-sub").textContent =
-    `${active} active in pipeline`;
-  clone.getElementById("kpi-sold-today").textContent = todaySales.length;
-  clone.getElementById("kpi-close-rate").textContent =
-    `${total ? Math.round((sold / total) * 100) : 0}% all-time close rate`;
-  clone.getElementById("kpi-cooloff").textContent = coolOff;
-  clone.getElementById("kpi-cooloff-sub").textContent =
-    `${Config.rules.coolOffDays}-day rule active`;
-
-  const coolOffCard = clone.getElementById("kpi-cooloff-card");
-  coolOffCard.className = `kpi-card ${coolOff > 0 ? "kpi-info" : "kpi-neutral"}`;
-
-  if (isAdmin()) {
-    const recycleCard = clone.getElementById("kpi-recycle-card");
-    clone.getElementById("kpi-recycle-count").textContent = needRecycle;
-    clone.getElementById("kpi-recycle-sub").textContent =
-      needRecycle > 0 ? "↓ See recycle queue below" : "All leads current";
-    recycleCard.className = `kpi-card admin-only ${needRecycle > 0 ? "kpi-warn" : "kpi-neutral"}`;
-    if (needRecycle > 0) {
-      recycleCard.style.cursor = "pointer";
-      recycleCard.onclick = () =>
-        document
-          .getElementById("dash-recycle-section")
-          .scrollIntoView({ behavior: "smooth" });
-    }
-  }
-
-  // 4. Inject Dynamic Lists
-  if (isAdmin()) {
-    clone.getElementById("dash-pipeline-status").innerHTML = Config.leadStatuses
-      .map((s) => {
-        const cls =
-          "status-" +
-          s
-            .toLowerCase()
-            .replace(/\s+/g, "-")
-            .replace(/[^a-z0-9-]/g, "");
-        return `<div class="status-row">
-                <span class="status-badge ${cls}">${s}</span>
-                <div class="status-bar-wrap"><div class="status-bar" style="width:${total ? (statusCounts[s] / total) * 100 : 0}%"></div></div>
-                <span class="status-count">${statusCounts[s]}</span>
-              </div>`;
-      })
-      .join("");
-  }
-
-  clone.getElementById("dash-top5").innerHTML = top5.length
-    ? top5
-        .map(
-          (e, i) => `
-      <div class="top5-row">
-        <span class="top5-rank rank-${i + 1}">${i + 1}</span>
-        <span class="top5-name">${escHtml(e[0])}</span>
-        <span class="top5-count">${e[1]} sale${e[1] !== 1 ? "s" : ""}</span>
-      </div>`,
-        )
-        .join("")
-    : `<p class="empty-state">No sales yet today.</p>`;
-
   const todayStr = new Date().toLocaleDateString();
   const agentUniqueLeads = {};
-
-  // ✂️ DELETED: The hardcoded aliasMap is officially dead!
 
   (State.activityLog || []).forEach((log) => {
     let isToday = false;
@@ -1088,66 +1013,181 @@ function renderDashboard() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
 
-  const dashContactsEl = clone.getElementById("dash-top5-contacts");
-  if (dashContactsEl) {
-    dashContactsEl.innerHTML = top5Contacts.length
-      ? top5Contacts
+  // ==========================================
+  //  THE NEW RENDER LOGIC
+  // ==========================================
+  const mainContent = document.getElementById("main-content");
+  mainContent.innerHTML = "";
+
+  // 1. Clone the HTML blueprint
+  const template = document.getElementById("tmpl-dashboard");
+  const clone = template.content.cloneNode(true);
+
+  // 2. Handle Admin Security
+  if (!isAdmin()) {
+    clone.querySelectorAll(".admin-only").forEach((el) => el.remove());
+  }
+
+  // 🚀 THE CONTRACTOR UI LOCKDOWN
+  if (isContractorUser()) {
+    clone.getElementById("dash-subtitle").textContent =
+      `// CONTRACTOR VIEW · v${Config.rules.appVersion}`;
+
+    // Hide all KPI cards instantly (No 'if' checks needed, querySelectorAll handles empty arrays safely)
+    clone
+      .querySelectorAll(".kpi-card")
+      .forEach((el) => (el.style.display = "none"));
+
+    // Hide the Leaderboards, Pipeline, and Recycle cards
+    clone
+      .querySelectorAll(
+        "#dash-top5, #dash-top5-contacts, #dash-pipeline-status, #dash-recycle-section",
+      )
+      .forEach((el) => {
+        (el.closest(".card") || el).style.display = "none";
+      });
+
+    // Inject Welcome Banner
+    const welcomeWrap = document.createElement("div");
+    const firstName = State.currentUser.name
+      ? State.currentUser.name.split(" ")[0]
+      : "there";
+    welcomeWrap.innerHTML = `
+      <div class="card" style="text-align:center; padding: 60px 20px; margin-top: 20px;">
+        <div style="font-size:3rem; margin-bottom:16px;">👋</div>
+        <h2 class="view-title">Welcome back, ${escHtml(firstName)}</h2>
+        <p style="color: var(--text-3); font-size: 15px;">Please use the sidebar menu to access your <b>My Leads</b> queue and <b>Automation</b> tools.</p>
+      </div>
+    `;
+    clone
+      .querySelector(".view-header")
+      .insertAdjacentElement("afterend", welcomeWrap);
+  } else {
+    // 3. Populate Header & KPIs FOR REGULAR EMPLOYEES
+    clone.getElementById("dash-subtitle").textContent =
+      `${isAdmin() ? "// ADMIN VIEW" : "// AGENT VIEW"} · v${Config.rules.appVersion}`;
+    clone.getElementById("kpi-total").textContent = total;
+    clone.getElementById("kpi-active-sub").textContent =
+      `${active} active in pipeline`;
+    clone.getElementById("kpi-sold-today").textContent = todaySales.length;
+    clone.getElementById("kpi-close-rate").textContent =
+      `${total ? Math.round((sold / total) * 100) : 0}% all-time close rate`;
+    clone.getElementById("kpi-cooloff").textContent = coolOff;
+    clone.getElementById("kpi-cooloff-sub").textContent =
+      `${Config.rules.coolOffDays}-day rule active`;
+
+    const coolOffCard = clone.getElementById("kpi-cooloff-card");
+    coolOffCard.className = `kpi-card ${coolOff > 0 ? "kpi-info" : "kpi-neutral"}`;
+
+    if (isAdmin()) {
+      const recycleCard = clone.getElementById("kpi-recycle-card");
+      clone.getElementById("kpi-recycle-count").textContent = needRecycle;
+      clone.getElementById("kpi-recycle-sub").textContent =
+        needRecycle > 0 ? "↓ See recycle queue below" : "All leads current";
+      recycleCard.className = `kpi-card admin-only ${needRecycle > 0 ? "kpi-warn" : "kpi-neutral"}`;
+      if (needRecycle > 0) {
+        recycleCard.style.cursor = "pointer";
+        recycleCard.onclick = () =>
+          document
+            .getElementById("dash-recycle-section")
+            .scrollIntoView({ behavior: "smooth" });
+      }
+    }
+
+    // 4. Inject Dynamic Lists
+    if (isAdmin()) {
+      clone.getElementById("dash-pipeline-status").innerHTML =
+        Config.leadStatuses
+          .map((s) => {
+            const cls =
+              "status-" +
+              s
+                .toLowerCase()
+                .replace(/\s+/g, "-")
+                .replace(/[^a-z0-9-]/g, "");
+            return `<div class="status-row">
+                  <span class="status-badge ${cls}">${s}</span>
+                  <div class="status-bar-wrap"><div class="status-bar" style="width:${total ? (statusCounts[s] / total) * 100 : 0}%"></div></div>
+                  <span class="status-count">${statusCounts[s]}</span>
+                </div>`;
+          })
+          .join("");
+    }
+
+    clone.getElementById("dash-top5").innerHTML = top5.length
+      ? top5
           .map(
             (e, i) => `
         <div class="top5-row">
           <span class="top5-rank rank-${i + 1}">${i + 1}</span>
           <span class="top5-name">${escHtml(e[0])}</span>
-          <span class="top5-count" style="color: var(--blue, #3b82f6);">${e[1]} contact${e[1] !== 1 ? "s" : ""}</span>
+          <span class="top5-count">${e[1]} sale${e[1] !== 1 ? "s" : ""}</span>
         </div>`,
           )
           .join("")
-      : `<p class="empty-state">No contacts logged yet today.</p>`;
-  }
+      : `<p class="empty-state">No sales yet today.</p>`;
 
-  // 5. Inject the Recycle Queue Table
-  if (isAdmin() && needRecycle > 0) {
-    clone.getElementById("dash-recycle-title").textContent =
-      `⚠️ Recycle Queue — ${needRecycle} lead${needRecycle !== 1 ? "s" : ""} ready`;
-
-    const recycleQueue = leads.filter(
-      (l) => l.flags && l.flags.includes("needs_recycle"),
-    );
-
-    clone.getElementById("dash-recycle-table").innerHTML = `
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Name</th><th>Address</th><th>Previously Assigned To</th><th>Last Contacted</th><th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${recycleQueue
+    const dashContactsEl = clone.getElementById("dash-top5-contacts");
+    if (dashContactsEl) {
+      dashContactsEl.innerHTML = top5Contacts.length
+        ? top5Contacts
             .map(
-              (l) => `
-            <tr>
-              <td><span class="lead-name">${escHtml(l.name)}</span></td>
-              <td class="td-mono" style="font-size:11px">${escHtml(l.address || "—")}${l.city ? ", " + escHtml(l.city) : ""}</td>
-              <td>
-                <div style="display:flex;flex-direction:column;gap:2px">
-                  ${l.assignedTo ? `<span style="font-size:13px;font-weight:600;color:#1A2640">${escHtml(AgentDirectory.getName(l.assignedTo))}</span>` : "—"}
-                  ${l.previousAgents ? `<span style="font-family:var(--font-mono);font-size:10px;color:#8EA5C8">Previously: ${escHtml(l.previousAgents)}</span>` : ""}
-                </div>
-              </td>
-              <td class="td-mono">${formatDate(l.lastContacted) || "—"}</td>
-              <td>
-                <button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="recycleLeadAction('${l.id}','${escHtml(l.assignedTo || "")}','${escHtml(l.name)}')">
-                  Recycle
-                </button>
-              </td>
-            </tr>
-          `,
+              (e, i) => `
+          <div class="top5-row">
+            <span class="top5-rank rank-${i + 1}">${i + 1}</span>
+            <span class="top5-name">${escHtml(e[0])}</span>
+            <span class="top5-count" style="color: var(--blue, #3b82f6);">${e[1]} contact${e[1] !== 1 ? "s" : ""}</span>
+          </div>`,
             )
-            .join("")}
-        </tbody>
-      </table>
-    `;
-  } else if (isAdmin()) {
-    clone.getElementById("dash-recycle-section").style.display = "none";
+            .join("")
+        : `<p class="empty-state">No contacts logged yet today.</p>`;
+    }
+
+    // 5. Inject the Recycle Queue Table
+    if (isAdmin() && needRecycle > 0) {
+      clone.getElementById("dash-recycle-title").textContent =
+        `⚠️ Recycle Queue — ${needRecycle} lead${needRecycle !== 1 ? "s" : ""} ready`;
+
+      const recycleQueue = leads.filter(
+        (l) => l.flags && l.flags.includes("needs_recycle"),
+      );
+
+      clone.getElementById("dash-recycle-table").innerHTML = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th><th>Address</th><th>Previously Assigned To</th><th>Last Contacted</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recycleQueue
+              .map(
+                (l) => `
+              <tr>
+                <td><span class="lead-name">${escHtml(l.name)}</span></td>
+                <td class="td-mono" style="font-size:11px">${escHtml(l.address || "—")}${l.city ? ", " + escHtml(l.city) : ""}</td>
+                <td>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    ${l.assignedTo ? `<span style="font-size:13px;font-weight:600;color:#1A2640">${escHtml(AgentDirectory.getName(l.assignedTo))}</span>` : "—"}
+                    ${l.previousAgents ? `<span style="font-family:var(--font-mono);font-size:10px;color:#8EA5C8">Previously: ${escHtml(l.previousAgents)}</span>` : ""}
+                  </div>
+                </td>
+                <td class="td-mono">${formatDate(l.lastContacted) || "—"}</td>
+                <td>
+                  <button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="recycleLeadAction('${l.id}','${escHtml(l.assignedTo || "").replace(/'/g, "\\'")}','${escHtml(l.name).replace(/'/g, "\\'")}')">
+                    Recycle
+                  </button>
+                </td>
+              </tr>
+            `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      `;
+    } else if (isAdmin()) {
+      clone.getElementById("dash-recycle-section").style.display = "none";
+    }
   }
 
   // 6. Mount it to the screen!
@@ -1340,7 +1380,7 @@ function startSalesFeedPolling() {
       // 🥷 3. THE BOUNCER: Let the AI silently scrub and archive hard NOs
       // before they can trigger the Triage Inbox UI or bother the reps
       await processSilentTriage(State.leads);
-
+      refreshMyLeadsBadges();
       // 🚀 4a. Silently redraw the active SMS thread (Dialer view)
       if (typeof SMS !== "undefined" && SMS.currentLead) {
         SMS.loadConversation(SMS.currentLead);
@@ -1428,6 +1468,144 @@ function startSalesFeedPolling() {
     }
   }
 
+  function refreshMyLeadsBadges() {
+    const feedWrap = document.getElementById("lead-feed-wrap");
+    if (!feedWrap) return;
+
+    const filterNow = new Date();
+    const tzHourCache = {};
+    let callbacks = 0,
+      yes = 0,
+      followup = 0,
+      newLeads = 0;
+
+    // Grab the exact agent name string using your existing logic
+    const user = State.currentUser;
+    const userName = ((user && user.name) || "").toLowerCase().trim();
+    const userEmail = ((user && user.email) || "").toLowerCase().trim();
+    const contractor = (State.contractors || []).find((c) => {
+      return (
+        (c.email || "").toLowerCase().trim() === userEmail ||
+        (c.name || "").toLowerCase().trim() === userName
+      );
+    });
+    const agentName = contractor
+      ? contractor.name.toLowerCase().trim()
+      : userName;
+
+    (State.leads || []).forEach((l) => {
+      // VIP Gate
+      if (!l.verifiedYes && l.status !== "Yes") return;
+
+      // Agent match
+      const assigned = (l.assignedTo || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+      const matchesAgent =
+        assigned &&
+        (assigned === agentName.replace(/\s+/g, " ") ||
+          assigned === userName.replace(/\s+/g, " ") ||
+          assigned === userEmail.replace(/\s+/g, " "));
+      if (!matchesAgent) return;
+
+      // Terminal & 3rd Contact
+      if (
+        Config.terminalStatuses.includes(l.status) ||
+        l.status === "3rd Contact"
+      )
+        return;
+
+      // Skipped & Cooldowns
+      if (
+        window._skippedSessionLeads &&
+        window._skippedSessionLeads.includes(l.id)
+      )
+        return;
+      if (window._sessionWorkedLeads && window._sessionWorkedLeads.has(l.id)) {
+        const savedTime = window._sessionWorkedLeads.get(l.id);
+        if ((Date.now() - savedTime) / 60000 < 5) return;
+      }
+
+      // Callbacks & Cool-off
+      let waitingForDate = false;
+      let isDueCallback = false;
+      if (l.callbackAt) {
+        const scheduledTime = new Date(l.callbackAt).getTime();
+        const dueThreshold = filterNow.getTime() + 5 * 60000;
+        if (scheduledTime > dueThreshold) waitingForDate = true;
+        else isDueCallback = true;
+      }
+
+      if (waitingForDate) return;
+      if (
+        !isDueCallback &&
+        typeof Graph !== "undefined" &&
+        Graph.isInCoolOff(l)
+      )
+        return;
+
+      // Timezone
+      if (l.state) {
+        let tz = "America/New_York";
+        if (typeof stateTimezones !== "undefined" && stateTimezones[l.state])
+          tz = stateTimezones[l.state];
+        if (tzHourCache[tz] === undefined) {
+          try {
+            tzHourCache[tz] = parseInt(
+              new Intl.DateTimeFormat("en-US", {
+                hour: "numeric",
+                hour12: false,
+                timeZone: tz,
+              }).format(filterNow),
+              10,
+            );
+          } catch (e) {
+            tzHourCache[tz] = 12;
+          }
+        }
+        const localHour = tzHourCache[tz];
+        if (localHour < 8 || localHour >= 20) return;
+      }
+
+      // 🚀 BUCKETING
+      const isUnread = l.SMSUnread || l.smsUnread;
+      const isFresh = l.status === "Yes" || l.status === "New";
+
+      if (isDueCallback) callbacks++;
+      else if (isUnread) yes++;
+      else if (isFresh) newLeads++;
+      else followup++;
+    });
+
+    const updateBadge = (id, count) => {
+      const b = document.getElementById(id);
+      if (b) {
+        b.textContent = count;
+        b.style.opacity = count > 0 ? "1" : "0.3";
+      }
+    };
+
+    updateBadge("badge-ml-callbacks", callbacks);
+    updateBadge("badge-ml-yes", yes);
+    updateBadge("badge-ml-followup", followup);
+    updateBadge("badge-ml-new", newLeads);
+
+    // Auto-switch tabs if idle
+    const isIdle =
+      feedWrap.innerHTML.includes("Tab Clear!") ||
+      feedWrap.innerHTML.includes("Queue Clear!");
+    if (isIdle && typeof renderMyLeads === "function") {
+      if (
+        (window._currentMyLeadsTab === "callbacks" && callbacks > 0) ||
+        (window._currentMyLeadsTab === "yes" && yes > 0) ||
+        (window._currentMyLeadsTab === "followup" && followup > 0) ||
+        (window._currentMyLeadsTab === "new" && newLeads > 0)
+      ) {
+        renderMyLeads(window._currentMyLeadsTab);
+      }
+    }
+  }
   // UI update helper stays the same
   function updateDashboardUI(newSales) {
     const feed = document.getElementById("dash-sales-feed");
@@ -1704,13 +1882,16 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     : userName;
 
   // ==========================================
-  // 🛑 1. BASE FILTER (Strips out Terminal, Skipped, Nighttime Leads)
+  // 🛑 1. BASE FILTER
   // ==========================================
   let hiddenByTimezone = 0;
   const filterNow = new Date();
   const tzHourCache = {};
 
   const baseLeads = State.leads.filter((l) => {
+    // 🚀 THE VERIFIED GATE: Only VerifiedYes leads can enter My Leads
+    if (!l.verifiedYes && l.status !== "Yes") return false;
+
     const assigned = (l.assignedTo || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
@@ -1731,7 +1912,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     )
       return false;
 
-    // 5-minute manual save lock
     if (window._sessionWorkedLeads && window._sessionWorkedLeads.has(l.id)) {
       const savedTime = window._sessionWorkedLeads.get(l.id);
       const minutesSinceSave = (Date.now() - savedTime) / 60000;
@@ -1739,7 +1919,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       else window._sessionWorkedLeads.delete(l.id);
     }
 
-    // Callbacks vs Cool-off
     let waitingForDate = false;
     let isDueCallback = false;
 
@@ -1753,10 +1932,9 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       }
     }
 
-    if (waitingForDate) return false; // Not due yet
-    if (!isDueCallback && Graph.isInCoolOff(l)) return false; // Strictly in cool-off
+    if (waitingForDate) return false;
+    if (!isDueCallback && Graph.isInCoolOff(l)) return false;
 
-    // Timezone Filter
     if (l.state) {
       let tz = "America/New_York";
       if (typeof stateTimezones !== "undefined" && stateTimezones[l.state])
@@ -1786,7 +1964,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   });
 
   // ==========================================
-  // 🛑 2. BUCKET THE LEADS BY TAB LOGIC
+  // 🛑 2. BUCKET THE POST-YES LEADS
   // ==========================================
   const buckets = {
     callbacks: [],
@@ -1800,30 +1978,28 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   baseLeads.forEach((l) => {
     const isCallbackDue =
       l.callbackAt && new Date(l.callbackAt).getTime() <= fiveMinsFromNow;
-    const isYes =
-      (l.status === "Yes" || l.status === "Interested") &&
-      (l.SMSUnread || l.smsUnread);
-    const isNew = l.status === "New";
+
+    const isUnread = l.SMSUnread || l.smsUnread;
+    const isFresh = l.status === "Yes" || l.status === "New";
 
     if (isCallbackDue) {
       buckets.callbacks.push(l);
-    } else if (isYes) {
+    } else if (isUnread) {
       buckets.yes.push(l);
-    } else if (isNew) {
+    } else if (isFresh) {
       buckets.new.push(l);
     } else {
       buckets.followup.push(l);
     }
   });
 
-  // Sort each bucket internally
   buckets.callbacks.sort(
     (a, b) => new Date(a.callbackAt) - new Date(b.callbackAt),
   );
   buckets.followup.sort((a, b) => {
     const aTime = a.lastContacted ? new Date(a.lastContacted).getTime() : 0;
     const bTime = b.lastContacted ? new Date(b.lastContacted).getTime() : 0;
-    return aTime - bTime; // Oldest wait time at the top
+    return aTime - bTime;
   });
   buckets.yes.sort((a, b) => a.id.localeCompare(b.id));
   buckets.new.sort((a, b) => a.id.localeCompare(b.id));
@@ -1839,12 +2015,19 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   }
 
   window._currentMyLeadsTab = tab;
-  let myLeads = buckets[tab] || [];
 
-  window._myLeads = myLeads;
+  // 🚀 THE FIX: The Bypass Lane for Searched Leads
+  let myLeads;
+  if (window._forceShowLead && window._myLeads && window._myLeads.length > 0) {
+    myLeads = window._myLeads; // Keep the injected search lead intact!
+  } else {
+    myLeads = buckets[tab] || [];
+    window._myLeads = myLeads; // Normal behavior: overwrite with the bucket
+  }
+
   window._agentName = agentName;
   _leadSaved = false;
-  window._forceShowLead = false;
+  window._forceShowLead = false; // Turn the bypass lane back off so normal navigation works after
 
   const mainContent = document.getElementById("main-content");
   mainContent.innerHTML = "";
@@ -1852,7 +2035,19 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const template = document.getElementById("tmpl-my-leads");
   const clone = template.content.cloneNode(true);
 
-  // Set the Top Badges
+  // 🚀 CONTRACTOR UI LOCKDOWN (Safely at the top!)
+  if (isContractorUser()) {
+    const qrContainer = clone.getElementById("sms-quick-reply-container");
+    if (qrContainer) qrContainer.style.display = "none";
+
+    const inputBox = clone.getElementById("sms-input-box");
+    if (inputBox && inputBox.parentNode)
+      inputBox.parentNode.style.display = "none";
+
+    const sendBtn = clone.getElementById("btn-send-sms");
+    if (sendBtn) sendBtn.style.display = "none";
+  }
+
   const contactsToday =
     typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
   const textEl = clone.getElementById("myleads-contact-text");
@@ -1884,7 +2079,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     const b = clone.getElementById(id);
     if (b) {
       b.textContent = count;
-      b.style.opacity = count > 0 ? "1" : "0.3"; // Dim empty buckets
+      b.style.opacity = count > 0 ? "1" : "0.3";
     }
   };
 
@@ -1934,7 +2129,12 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const activeLead = myLeads[_currentFeedIndex];
   const qrContainer = clone.getElementById("sms-quick-reply-container");
 
-  if (qrContainer && typeof Config !== "undefined" && Config.smsTemplates) {
+  if (
+    !isContractorUser() &&
+    qrContainer &&
+    typeof Config !== "undefined" &&
+    Config.smsTemplates
+  ) {
     Object.keys(Config.smsTemplates).forEach((key) => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -3824,11 +4024,57 @@ function completeCallbackLead(leadId) {
 // ============================================================
 // 📢 AUTOMATION & MASS MESSAGING CONTROLLER
 // ============================================================
+function renderAutomation() {
+  const mainContent = document.getElementById("main-content");
+  if (!mainContent) return;
+
+  mainContent.innerHTML = "";
+
+  const template = document.getElementById("tmpl-automation");
+  if (!template) {
+    mainContent.innerHTML = `<div class="empty-state">Automation template missing from index.html.</div>`;
+    return;
+  }
+
+  const clone = template.content.cloneNode(true);
+
+  // 🚀 NEW: Dynamically populate the Post-Message Status Dropdown
+  const postStatusSelect = clone.getElementById("auto-post-status");
+  if (
+    postStatusSelect &&
+    typeof Config !== "undefined" &&
+    Config.leadStatuses
+  ) {
+    Config.leadStatuses.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = s;
+      opt.textContent = `Change status to: ${s}`;
+      postStatusSelect.appendChild(opt);
+    });
+  }
+
+  mainContent.appendChild(clone);
+
+  // Initialize presets and load eligible audience table
+  Automation.loadTemplate("initial");
+  Automation.filterAudience();
+
+  // 🚀 THE FIX: Restore button lock if they navigated away and came back!
+  if (Automation.isBlastRunning) {
+    const launchBtn = document.getElementById("btn-launch-campaign");
+    if (launchBtn) {
+      launchBtn.disabled = true;
+      launchBtn.innerHTML = `<span>BLAST IN PROGRESS...</span>`;
+    }
+  }
+}
+
 const Automation = {
+  isBlastRunning: false,
   selectedRecipients: new Set(),
   currentTemplateKey: "initial",
 
-  // 1. Storage Helper (Now pulls defaults centrally from Config)
+  // 1. Storage Helper
   getTemplates() {
     const saved = localStorage.getItem("RaimakSMSTemplates");
     return saved
@@ -3841,14 +4087,39 @@ const Automation = {
     this.currentTemplateKey = key || "initial";
     const templates = this.getTemplates();
     const textarea = document.getElementById("auto-template-body");
+
     if (textarea) {
       textarea.value = templates[this.currentTemplateKey] || "";
+
+      // 🚀 THE CONTRACTOR UI LOCKDOWN
+      if (typeof isContractorUser === "function" && isContractorUser()) {
+        textarea.readOnly = true;
+        textarea.style.backgroundColor = "#1a1a24";
+        textarea.style.cursor = "not-allowed";
+        textarea.style.opacity = "0.8";
+        textarea.style.border = "1px solid #333";
+      } else {
+        textarea.readOnly = false;
+        textarea.style.backgroundColor = "";
+        textarea.style.cursor = "text";
+        textarea.style.opacity = "1";
+        textarea.style.border = "";
+      }
+
       if (typeof this.updatePreview === "function") this.updatePreview();
     }
   },
 
   // 4. Save Custom Edits to localStorage
   saveCurrentTemplate() {
+    // 🚀 SECURITY WALL
+    if (typeof isContractorUser === "function" && isContractorUser()) {
+      if (typeof UI !== "undefined" && UI.showToast) {
+        UI.showToast("Contractors cannot edit master templates.", "error");
+      }
+      return;
+    }
+
     const textarea = document.getElementById("auto-template-body");
     if (!textarea) return;
 
@@ -3862,6 +4133,9 @@ const Automation = {
 
   // 5. One-Click Merge Tag Inserter
   insertTag(tag) {
+    // 🚀 SECURITY WALL
+    if (typeof isContractorUser === "function" && isContractorUser()) return;
+
     const textarea = document.getElementById("auto-template-body");
     if (!textarea) return;
 
@@ -3900,6 +4174,12 @@ const Automation = {
     const eligibleLeads = (State.leads || []).filter((l) => {
       // 🛑 TCPA CIRCUIT BREAKER: Never include opted-out contacts
       if (l.SMSOptOut === true || l.smsOptOut === true) return false;
+
+      // 🛑 THE VIP SHIELD: Never let automation touch a lead that is actively being worked!
+      if (l.verifiedYes === true) return false;
+
+      // 🛑 THE ACTIVE CONVERSATION SHIELD: Never blast a lead waiting for a human reply!
+      if (l.SMSUnread === true || l.smsUnread === true) return false;
 
       // Must have a valid phone number (Phone or CBR)
       const rawPhone = l.phone || l.cbr || l.CBR || "";
@@ -4019,14 +4299,12 @@ const Automation = {
 
     const rawText = textarea.value;
 
-    // Character math
     if (charCountEl) {
       const len = rawText.length;
       const segments = Math.ceil(len / 160) || 1;
       charCountEl.textContent = `${len} chars (${segments} SMS)`;
     }
 
-    // Grab first selected lead, or fallback to dummy preview data
     const firstId = Array.from(this.selectedRecipients)[0];
     const sampleLead = (State.leads || []).find((l) => l.id === firstId) || {
       name: "Michael McAlpine",
@@ -4055,8 +4333,17 @@ const Automation = {
       personalized || "Type a template to generate preview...";
   },
 
-  // 10. Mass Blast Launcher with Sequential 1.5s A2P 10DLC Throttling
+  // 10. Mass Blast Launcher with Sequential 1.5s A2P 10DLC Throttling & Background Support
   async launchMassBlast() {
+    if (this.isBlastRunning) {
+      if (typeof UI !== "undefined" && UI.showToast)
+        UI.showToast(
+          "A campaign is already running in the background!",
+          "warning",
+        );
+      return;
+    }
+
     const selectedIds = Array.from(this.selectedRecipients);
     if (!selectedIds.length) {
       if (typeof UI !== "undefined" && UI.showToast)
@@ -4075,7 +4362,6 @@ const Automation = {
       return alert("Template copy cannot be empty.");
     }
 
-    // 🚀 Grab the targeted post-message status
     const postStatusSelect = document.getElementById("auto-post-status");
     const targetStatus = postStatusSelect
       ? postStatusSelect.value
@@ -4093,20 +4379,22 @@ const Automation = {
       return;
     }
 
-    const launchBtn = document.getElementById("btn-launch-campaign");
-    const originalText = launchBtn
-      ? launchBtn.innerHTML
-      : "LAUNCH CAMPAIGN BLAST";
-    if (launchBtn) launchBtn.disabled = true;
-
+    this.isBlastRunning = true;
     let sentCount = 0;
     let failCount = 0;
+    const total = selectedIds.length;
 
-    for (let i = 0; i < selectedIds.length; i++) {
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `Campaign initiated for ${total} leads. You can safely navigate away.`,
+        "info",
+      );
+    }
+
+    for (let i = 0; i < total; i++) {
       const id = selectedIds[i];
       const lead = (State.leads || []).find((l) => l.id === id);
 
-      // Final safety guard inside loop
       if (!lead || lead.SMSOptOut === true || lead.smsOptOut === true) {
         failCount++;
         continue;
@@ -4122,7 +4410,6 @@ const Automation = {
       const agentName =
         (State.currentUser && State.currentUser.name) || "Your Verizon Rep";
 
-      // 🛡️ Sanitize to protect Twilio balance!
       const personalizedBody = SMS.sanitizeForGSM7(
         templateText
           .replace(
@@ -4137,31 +4424,30 @@ const Automation = {
           .replace(/{AgentName}/g, agentName),
       );
 
-      if (launchBtn) {
-        launchBtn.innerHTML = `<span>SENDING (${i + 1}/${selectedIds.length})...</span>`;
+      const activeLaunchBtn = document.getElementById("btn-launch-campaign");
+      if (activeLaunchBtn) {
+        activeLaunchBtn.innerHTML = `<span>SENDING (${i + 1}/${total})...</span>`;
+      } else if ((i + 1) % 10 === 0) {
+        if (typeof UI !== "undefined" && UI.showToast) {
+          UI.showToast(
+            `Background Campaign: ${i + 1}/${total} messages processed...`,
+            "info",
+          );
+        }
       }
 
       try {
-        // Extract strictly the last 10 digits for the CBR match
         const cbrToSend = cleanPhone.slice(-10);
-
-        // 1. Fire the SMS via our offline-cached SMSApi
         await Graph.sendTextMessage(cbrToSend, personalizedBody);
-
         let statusLogAppend = "";
 
-        // 2. Execute the Status Change if requested
         if (targetStatus !== "no_change") {
-          // Push to SharePoint
           await Graph.updateLead(lead.id, { Status: targetStatus });
-          // Optimistically update local RAM so the UI doesn't need a hard reload
           lead.status = targetStatus;
           statusLogAppend = ` & Status updated to ${targetStatus}`;
         }
-
         sentCount++;
 
-        // 3. Log outreach to SharePoint activity log automatically
         if (typeof Graph !== "undefined" && Graph.logActivity) {
           await Graph.logActivity({
             LeadID: lead.id,
@@ -4179,15 +4465,22 @@ const Automation = {
         failCount++;
       }
 
-      // ⏱️ A2P 10DLC Pacing Delay: Pause 1500ms between sends
-      if (i < selectedIds.length - 1) {
+      if (i < total - 1) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
 
-    if (launchBtn) {
-      launchBtn.disabled = false;
-      launchBtn.innerHTML = originalText;
+    this.isBlastRunning = false;
+    this.selectedRecipients.clear();
+
+    const finalLaunchBtn = document.getElementById("btn-launch-campaign");
+    if (finalLaunchBtn) {
+      finalLaunchBtn.disabled = false;
+      finalLaunchBtn.innerHTML = "LAUNCH CAMPAIGN BLAST";
+    }
+
+    if (document.getElementById("auto-recipient-tbody")) {
+      this.filterAudience();
     }
 
     if (sentCount > 0) {
@@ -4196,64 +4489,20 @@ const Automation = {
           `✅ Broadcast finished: ${sentCount} sent, ${failCount} skipped/failed.`,
           "success",
         );
-      } else {
+      } else
         alert(
           `✅ Broadcast finished: ${sentCount} sent, ${failCount} skipped/failed.`,
         );
-      }
-      this.selectedRecipients.clear();
-      this.filterAudience(); // Auto-refresh table
     } else {
       if (typeof UI !== "undefined" && UI.showToast) {
         UI.showToast(
           "⚠️ All campaign messages failed to send or were skipped.",
           "error",
         );
-      } else {
-        alert("⚠️ All campaign messages failed to send or were skipped.");
-      }
+      } else alert("⚠️ All campaign messages failed to send or were skipped.");
     }
   },
 };
-
-// ============================================================
-//  VIEW CONTROLLER: AUTOMATION & MASS MESSAGING
-// ============================================================
-function renderAutomation() {
-  const mainContent = document.getElementById("main-content");
-  if (!mainContent) return;
-
-  mainContent.innerHTML = "";
-
-  const template = document.getElementById("tmpl-automation");
-  if (!template) {
-    mainContent.innerHTML = `<div class="empty-state">Automation template missing from index.html.</div>`;
-    return;
-  }
-
-  const clone = template.content.cloneNode(true);
-
-  // 🚀 NEW: Dynamically populate the Post-Message Status Dropdown
-  const postStatusSelect = clone.getElementById("auto-post-status");
-  if (
-    postStatusSelect &&
-    typeof Config !== "undefined" &&
-    Config.leadStatuses
-  ) {
-    Config.leadStatuses.forEach((s) => {
-      const opt = document.createElement("option");
-      opt.value = s;
-      opt.textContent = `Change status to: ${s}`;
-      postStatusSelect.appendChild(opt);
-    });
-  }
-
-  mainContent.appendChild(clone);
-
-  // Initialize presets and load eligible audience table
-  Automation.loadTemplate("initial");
-  Automation.filterAudience();
-}
 
 function renderLeads() {
   if (!isAdmin()) {
@@ -6370,10 +6619,7 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
   // 2. THE CUSTOM UI BLOCKER
   if (bucketStatus === "Yes" || bucketStatus === "Pending Order") {
     const userChoice = await promptTriageAutoReply();
-
-    // If they clicked Cancel, completely abort the function!
-    if (userChoice === null) return;
-
+    if (userChoice === null) return; // Abort if cancelled
     wantsAutoReply = userChoice;
   }
 
@@ -6386,8 +6632,6 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
   // 4. Trigger the slide-out animation
   if (cardElement) {
     cardElement.classList.add("card-cleared");
-
-    // Optimistically update the UI counter badge
     const badge = document.getElementById("triage-count-badge");
     if (badge) badge.textContent = Math.max(0, parseInt(badge.textContent) - 1);
   }
@@ -6401,20 +6645,29 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
       SMSUnread: false,
     };
 
+    // 🚀 THE VERIFIED FIX: Push the VIP flag to SharePoint
+    if (bucketStatus === "Yes") {
+      updatePayload["VerifiedYes"] = true;
+    }
+
     // 6. Fire the update to Graph silently in the background
     await Graph.updateLead(leadId, updatePayload);
 
-    // 🚀 7. THE FIX: Update local RAM safely! DO NOT overwrite the object.
+    // 7. Update local RAM safely
     const lead = State.leads.find((l) => l.id === leadId);
     if (lead) {
       lead.status = finalStatus;
       lead.SMSUnread = false;
-      lead.smsUnread = false; // Catch both casing styles just in case
+      lead.smsUnread = false;
+
+      // 🚀 THE VERIFIED FIX: Update RAM flag
+      if (bucketStatus === "Yes") {
+        lead.verifiedYes = true;
+      }
     }
 
     // 8. FIRE THE AUTO-REPLY VIA TWILIO
     if (wantsAutoReply && lead) {
-      // Safely check all possible phone fields
       const rawPhone =
         lead.cbr || lead.CBR || lead.phone || lead.btn || lead.BTN || "";
       const cleanCBR = String(rawPhone).replace(/\D/g, "");
@@ -6448,8 +6701,6 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
       if (cardElement && cardElement.parentNode) {
         cardElement.parentNode.removeChild(cardElement);
       }
-
-      // If we cleared the last one, manually trigger the empty state
       const remainingCards = document.querySelectorAll(
         ".triage-card:not(.card-cleared)",
       );
@@ -6463,12 +6714,10 @@ async function confirmTriageStatus(event, leadId, bucketStatus) {
     if (typeof UI !== "undefined" && UI.showToast)
       UI.showToast("Failed to sync status. It will reappear shortly.", "error");
 
-    // If it failed, remove the class so the card pops back in for them to retry
     if (cardElement) {
       cardElement.classList.remove("card-cleared");
       const badge = document.getElementById("triage-count-badge");
       if (badge) badge.textContent = parseInt(badge.textContent) + 1;
-
       if (clickedBtn) {
         clickedBtn.innerHTML = "Verify YES";
         clickedBtn.disabled = false;
@@ -6499,28 +6748,42 @@ function promptTriageAutoReply() {
     const btnNoText = document.getElementById("btn-triage-no-text");
     const btnSend = document.getElementById("btn-triage-send");
 
+    // 🚀 THE CONTRACTOR LOCKDOWN: Hide the bypass buttons!
+    if (typeof isContractorUser === "function" && isContractorUser()) {
+      if (btnCancel) btnCancel.style.display = "none";
+      if (btnNoText) btnNoText.style.display = "none";
+      // Optionally rename the primary button so it's blatantly obvious
+      if (btnSend) btnSend.textContent = "Send Auto-Reply & Verify";
+    }
+
     // 4. Cleanup function to wipe it from the DOM
     const cleanup = () => {
       if (overlay) overlay.remove();
     };
 
     // User aborts the entire action (Card stays in Triage)
-    btnCancel.onclick = () => {
-      cleanup();
-      resolve(null);
-    };
+    if (btnCancel) {
+      btnCancel.onclick = () => {
+        cleanup();
+        resolve(null);
+      };
+    }
 
     // User wants to verify, but SKIP the text (Card clears, no SMS)
-    btnNoText.onclick = () => {
-      cleanup();
-      resolve(false);
-    };
+    if (btnNoText) {
+      btnNoText.onclick = () => {
+        cleanup();
+        resolve(false);
+      };
+    }
 
     // User wants to verify AND fire the text (Card clears, SMS fires)
-    btnSend.onclick = () => {
-      cleanup();
-      resolve(true);
-    };
+    if (btnSend) {
+      btnSend.onclick = () => {
+        cleanup();
+        resolve(true);
+      };
+    }
   });
 }
 

@@ -449,6 +449,25 @@ const Graph = (() => {
   async function getLeads(lastSyncDate = null, existingLeads = []) {
     await resolveSiteIds();
 
+    // 🚀 THE FIX: Silent Auto-Patcher for the VerifiedYes Rollout
+    if (!localStorage.getItem("patch_verified_yes_v1")) {
+      console.log("🧹 Applying VerifiedYes database patch...");
+      localStorage.removeItem("RaimakVZLeadsLastSyncDate");
+
+      if (
+        typeof LocalDB !== "undefined" &&
+        typeof LocalDB.clearStore === "function"
+      ) {
+        await LocalDB.clearStore("leads");
+      }
+
+      localStorage.setItem("patch_verified_yes_v1", "true");
+
+      // Force the variables empty so the rest of the function triggers a Cold Boot
+      existingLeads = [];
+      lastSyncDate = null;
+    }
+
     // 🚀 STEP 1: Load from IndexedDB
     if (!existingLeads || existingLeads.length === 0) {
       existingLeads = await LocalDB.getAllItems("leads");
@@ -722,6 +741,15 @@ const Graph = (() => {
       numberOfLines: f.NumberOfLines || "",
       phoneStatus: f.PhoneStatus || "",
       quotedAt: f.QuotedAt || "",
+
+      // 🚀 NEW: The VIP Verified Pass
+      verifiedYes:
+        f.VerifiedYes === true ||
+        f.VerifiedYes === "true" ||
+        f.VerifiedYes === "Yes" ||
+        f.Verified_x0020_Yes === true ||
+        f.Verified_x0020_Yes === "true" ||
+        f.Verified_x0020_Yes === "Yes",
 
       previousAgents: f.PreviousAgents || "",
       // 💬 VERIZON & SMS FIELDS
@@ -1415,6 +1443,9 @@ const Graph = (() => {
 
   function isInCoolOff(lead) {
     if (lead.status === "New") return false;
+
+    // 🚀 GLOBAL OVERRIDE: If they texted us, they are instantly out of cool-off everywhere
+    if (lead.SMSUnread === true || lead.smsUnread === true) return false;
 
     if (!lead.lastContacted) return false;
     const daysSince = (new Date() - new Date(lead.lastContacted)) / 86400000;

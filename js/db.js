@@ -77,4 +77,17 @@ const LocalDB = {
       request.onerror = (event) => reject(event.target.error);
     });
   },
+
+  // 5. Nuke an entire table instantly (Cache Busting)
+  clearStore: async function (storeName) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([storeName], "readwrite");
+      const store = transaction.objectStore(storeName);
+
+      const request = store.clear();
+
+      request.onsuccess = () => resolve(true);
+      request.onerror = (event) => reject(event.target.error);
+    });
+  },
 };
