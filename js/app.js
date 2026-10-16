@@ -1033,7 +1033,7 @@ function renderDashboard() {
     clone.getElementById("dash-subtitle").textContent =
       `// CONTRACTOR VIEW · v${Config.rules.appVersion}`;
 
-    // Hide all KPI cards instantly (No 'if' checks needed, querySelectorAll handles empty arrays safely)
+    // Hide all KPI cards instantly
     clone
       .querySelectorAll(".kpi-card")
       .forEach((el) => (el.style.display = "none"));
@@ -1047,16 +1047,25 @@ function renderDashboard() {
         (el.closest(".card") || el).style.display = "none";
       });
 
+    // 🚀 THE VISUAL HIDE: Remove "My Leads" and "Callbacks" from the sidebar menu
+    const myLeadsBtn = document.querySelector('a[data-view="myleads"]');
+    if (myLeadsBtn) myLeadsBtn.style.display = "none";
+
+    const callbacksBtn = document.querySelector('a[data-view="callbacks"]');
+    if (callbacksBtn) callbacksBtn.style.display = "none";
+
     // Inject Welcome Banner
     const welcomeWrap = document.createElement("div");
     const firstName = State.currentUser.name
       ? State.currentUser.name.split(" ")[0]
       : "there";
+
+    // 🚀 UPDATED: Removed "My Leads" from the welcome text, replaced with Triage Inbox
     welcomeWrap.innerHTML = `
       <div class="card" style="text-align:center; padding: 60px 20px; margin-top: 20px;">
         <div style="font-size:3rem; margin-bottom:16px;">👋</div>
         <h2 class="view-title">Welcome back, ${escHtml(firstName)}</h2>
-        <p style="color: var(--text-3); font-size: 15px;">Please use the sidebar menu to access your <b>My Leads</b> queue and <b>Automation</b> tools.</p>
+        <p style="color: var(--text-3); font-size: 15px;">Please use the sidebar menu to access the <b>Triage Inbox</b> and your <b>Automation</b> tools.</p>
       </div>
     `;
     clone
@@ -4098,6 +4107,20 @@ const Automation = {
         textarea.style.cursor = "not-allowed";
         textarea.style.opacity = "0.8";
         textarea.style.border = "1px solid #333";
+
+        // Hide the Post Message Action row
+        const postStatusEl = document.getElementById("auto-post-status");
+        if (postStatusEl && postStatusEl.parentElement) {
+          postStatusEl.parentElement.style.display = "none";
+        }
+
+        // Restrict status filter options to "New" only
+        const statusSelect = document.getElementById("auto-filter-status");
+        if (statusSelect) {
+          statusSelect.innerHTML = '<option value="New">New</option>';
+          statusSelect.value = "New";
+          statusSelect.disabled = true;
+        }
       } else {
         textarea.readOnly = false;
         textarea.style.backgroundColor = "";
@@ -4152,8 +4175,14 @@ const Automation = {
 
   // 6. Audience Filter & TCPA/Opt-Out Shield
   filterAudience() {
-    const statusFilter =
-      (document.getElementById("auto-filter-status") || {}).value || "all";
+    const isContractor =
+      typeof isContractorUser === "function" && isContractorUser();
+
+    // 🚀 CONTRACTOR STATUS LOCK: Always evaluate as "New"
+    const statusFilter = isContractor
+      ? "New"
+      : (document.getElementById("auto-filter-status") || {}).value || "all";
+
     const agentFilter =
       (document.getElementById("auto-filter-agent") || {}).value || "me";
 
@@ -4314,20 +4343,24 @@ const Automation = {
       BTN: "727-555-0199",
     };
 
-    const agentName =
-      (State.currentUser && State.currentUser.name) || "Your Verizon Rep";
+    // 🚀 FIRST NAME ONLY: Trims whitespace and extracts the first token
+    const agentFirstName =
+      State.currentUser && State.currentUser.name
+        ? State.currentUser.name.trim().split(/\s+/)[0]
+        : "Your Verizon Rep";
 
     const personalized = rawText
       .replace(
         /{FirstName}/g,
-        sampleLead.firstName || sampleLead.name.split(" ")[0] || "there",
+        sampleLead.firstName ||
+          (sampleLead.name ? sampleLead.name.split(" ")[0] : "there"),
       )
       .replace(/{LastName}/g, sampleLead.lastName || "")
       .replace(
         /{BTN}/g,
         sampleLead.btn || sampleLead.BTN || sampleLead.phone || "your account",
       )
-      .replace(/{AgentName}/g, agentName);
+      .replace(/{AgentName}/g, agentFirstName);
 
     previewEl.textContent =
       personalized || "Type a template to generate preview...";
@@ -4354,6 +4387,38 @@ const Automation = {
       return alert("Please check at least one recipient first.");
     }
 
+    // 🚀 THE CONTRACTOR DAILY LIMIT
+    if (typeof isContractorUser === "function" && isContractorUser()) {
+      const dailyLimit = 300;
+      const alreadyTextedToday =
+        typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
+
+      if (alreadyTextedToday >= dailyLimit) {
+        if (typeof UI !== "undefined" && UI.showToast) {
+          UI.showToast(
+            `Daily limit of ${dailyLimit} reached. Great work today!`,
+            "error",
+          );
+        }
+        return alert(
+          `You have hit your daily outbound limit of ${dailyLimit} leads. Time to work your inbox!`,
+        );
+      }
+
+      if (alreadyTextedToday + selectedIds.length > dailyLimit) {
+        const remainingAllowed = dailyLimit - alreadyTextedToday;
+        if (typeof UI !== "undefined" && UI.showToast) {
+          UI.showToast(
+            `You can only send ${remainingAllowed} more messages today.`,
+            "warning",
+          );
+        }
+        return alert(
+          `You are trying to blast ${selectedIds.length} leads, but you only have ${remainingAllowed} texts left in your daily limit. Please uncheck some leads.`,
+        );
+      }
+    }
+
     const templateText =
       (document.getElementById("auto-template-body") || {}).value || "";
     if (!templateText.trim()) {
@@ -4362,10 +4427,17 @@ const Automation = {
       return alert("Template copy cannot be empty.");
     }
 
+    const isContractor =
+      typeof isContractorUser === "function" && isContractorUser();
     const postStatusSelect = document.getElementById("auto-post-status");
-    const targetStatus = postStatusSelect
-      ? postStatusSelect.value
-      : "no_change";
+
+    // 🚀 CONTRACTOR POST-ACTION LOCK: Always force "1st Contact"
+    const targetStatus = isContractor
+      ? "1st Contact"
+      : postStatusSelect
+        ? postStatusSelect.value
+        : "no_change";
+
     const statusNotice =
       targetStatus !== "no_change"
         ? `\n\nTheir status will automatically be updated to: "${targetStatus}".`
@@ -4407,21 +4479,24 @@ const Automation = {
         continue;
       }
 
-      const agentName =
-        (State.currentUser && State.currentUser.name) || "Your Verizon Rep";
+      // 🚀 FIRST NAME ONLY
+      const agentFirstName =
+        State.currentUser && State.currentUser.name
+          ? State.currentUser.name.trim().split(/\s+/)[0]
+          : "Your Verizon Rep";
 
       const personalizedBody = SMS.sanitizeForGSM7(
         templateText
           .replace(
             /{FirstName}/g,
-            lead.firstName || lead.name.split(" ")[0] || "there",
+            lead.firstName || (lead.name ? lead.name.split(" ")[0] : "there"),
           )
           .replace(/{LastName}/g, lead.lastName || "")
           .replace(
             /{BTN}/g,
             lead.btn || lead.BTN || lead.phone || "your account",
           )
-          .replace(/{AgentName}/g, agentName),
+          .replace(/{AgentName}/g, agentFirstName),
       );
 
       const activeLaunchBtn = document.getElementById("btn-launch-campaign");
