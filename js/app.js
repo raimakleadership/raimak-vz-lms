@@ -8910,7 +8910,17 @@ function renderLeadModal(lead) {
   const modalSmsInput = clone.getElementById("modal-sms-input");
   const modalSmsSendBtn = clone.getElementById("modal-sms-send-btn");
 
-  if (modalSmsInput && modalSmsSendBtn && lead && lead.cbr) {
+  // 🚀 CONTRACTOR UI LOCKDOWN: Remove the custom text box entirely
+  if (typeof isContractorUser === "function" && isContractorUser()) {
+    if (modalSmsInput && modalSmsInput.parentElement) {
+      modalSmsInput.parentElement.style.display = "none";
+    }
+  } else if (
+    modalSmsInput &&
+    modalSmsSendBtn &&
+    lead &&
+    (lead.cbr || lead.CBR)
+  ) {
     modalSmsSendBtn.onclick = async () => {
       let text = modalSmsInput.value.trim();
       if (!text) return;
@@ -8946,7 +8956,9 @@ function renderLeadModal(lead) {
       }
 
       try {
-        const cleanCBR = String(lead.cbr).replace(/\D/g, "").slice(-10);
+        const rawCBR =
+          lead.cbr || lead.CBR || lead.phone || lead.btn || lead.BTN || "";
+        const cleanCBR = String(rawCBR).replace(/\D/g, "").slice(-10);
         await Graph.sendTextMessage(cleanCBR, text);
       } catch (err) {
         console.error("Modal SMS Error:", err);
