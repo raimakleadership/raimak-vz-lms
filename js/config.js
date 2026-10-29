@@ -62,7 +62,7 @@ const Config = {
   soldStatus: "Sold",
 
   // Lead types
-  leadTypes: ["OFS", "MLR", "Forced"],
+  leadTypes: ["Contractor", "MLR", "Forced"],
 
   // Current products options — alphabetical
   currentProducts: [
@@ -90,7 +90,7 @@ const Config = {
 
   roles: {
     admins: [
-      "m.mcalpine@raimak.com",
+      "m.mclpine@raimak.com",
       "RichardZacker@raimak.com",
       "B.Hinesley@raimak.com",
       "S.Balleste@raimak.com",
