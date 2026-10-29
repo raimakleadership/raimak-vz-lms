@@ -1836,6 +1836,15 @@ let _currentFeedIndex = 0;
 window._currentMyLeadsTab = window._currentMyLeadsTab || null;
 
 function renderMyLeads(tab = window._currentMyLeadsTab) {
+  // 🚀 THE ULTIMATE CONTRACTOR BOUNCER
+  if (typeof isContractorUser === "function" && isContractorUser()) {
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast("Access Restricted: Routing to Triage Inbox", "error");
+    }
+    if (typeof switchView === "function") return switchView("triage");
+    return;
+  }
+
   if (typeof _leadSaved === "undefined") window._leadSaved = false;
 
   if (!window._forceShowLead && tab === window._currentMyLeadsTab) {
@@ -1898,8 +1907,15 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const tzHourCache = {};
 
   const baseLeads = State.leads.filter((l) => {
-    // 🚀 THE VERIFIED GATE: Only VerifiedYes leads can enter My Leads
-    if (!l.verifiedYes && l.status !== "Yes") return false;
+    // 🚀 THE NEW VERIFIED GATE: Must be a Yes OR a manual follow-up
+    const isManualFollowUp = [
+      "1st Contact",
+      "2nd Contact",
+      "3rd Contact",
+    ].includes(l.status);
+
+    // If it's not a VerifiedYes AND not a manual follow-up, dump it
+    if (!l.verifiedYes && l.status !== "Yes" && !isManualFollowUp) return false;
 
     const assigned = (l.assignedTo || "")
       .toLowerCase()
@@ -1913,7 +1929,9 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
 
     if (!matchesAgent) return false;
     if (Config.terminalStatuses.includes(l.status)) return false;
-    if (l.status === "3rd Contact") return false;
+
+    // Remove the block on 3rd contact so they can finish the cadence
+    // if (l.status === "3rd Contact") return false;
 
     if (
       window._skippedSessionLeads &&
@@ -1941,8 +1959,11 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       }
     }
 
-    if (waitingForDate) return false;
-    if (!isDueCallback && Graph.isInCoolOff(l)) return false;
+    // 🚀 UNREAD OVERRIDE: If the customer texted us, they bypass ALL hiding rules!
+    const hasUnread = l.SMSUnread === true || l.smsUnread === true;
+
+    if (waitingForDate && !hasUnread) return false;
+    if (!isDueCallback && !hasUnread && Graph.isInCoolOff(l)) return false;
 
     if (l.state) {
       let tz = "America/New_York";
@@ -1963,9 +1984,13 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
         }
       }
       const localHour = tzHourCache[tz];
+
+      // 🚀 UNREAD OVERRIDE: Allow unread messages to bypass the 8 PM - 8 AM curfew
       if (localHour < 8 || localHour >= 20) {
-        hiddenByTimezone++;
-        return false;
+        if (!hasUnread) {
+          hiddenByTimezone++;
+          return false;
+        }
       }
     }
 
@@ -1979,6 +2004,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     callbacks: [],
     yes: [],
     followup: [],
+    noreply: [], // 🚀 NEW: The bucket for manual text/call cadence
     new: [],
   };
 
@@ -1990,6 +2016,9 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
 
     const isUnread = l.SMSUnread || l.smsUnread;
     const isFresh = l.status === "Yes" || l.status === "New";
+    const isNoReply =
+      ["1st Contact", "2nd Contact", "3rd Contact"].includes(l.status) &&
+      !l.verifiedYes;
 
     if (isCallbackDue) {
       buckets.callbacks.push(l);
@@ -1997,6 +2026,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       buckets.yes.push(l);
     } else if (isFresh) {
       buckets.new.push(l);
+    } else if (isNoReply) {
+      buckets.noreply.push(l); // Drops them in the new manual cadence tab
     } else {
       buckets.followup.push(l);
     }
@@ -2010,6 +2041,11 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     const bTime = b.lastContacted ? new Date(b.lastContacted).getTime() : 0;
     return aTime - bTime;
   });
+  buckets.noreply.sort((a, b) => {
+    const aTime = a.lastContacted ? new Date(a.lastContacted).getTime() : 0;
+    const bTime = b.lastContacted ? new Date(b.lastContacted).getTime() : 0;
+    return aTime - bTime; // Oldest contact attempt first
+  });
   buckets.yes.sort((a, b) => a.id.localeCompare(b.id));
   buckets.new.sort((a, b) => a.id.localeCompare(b.id));
 
@@ -2020,6 +2056,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     if (buckets.callbacks.length > 0) tab = "callbacks";
     else if (buckets.yes.length > 0) tab = "yes";
     else if (buckets.followup.length > 0) tab = "followup";
+    else if (buckets.noreply.length > 0)
+      tab = "noreply"; // 🚀 Priority routing
     else tab = "new";
   }
 
@@ -2044,19 +2082,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const template = document.getElementById("tmpl-my-leads");
   const clone = template.content.cloneNode(true);
 
-  // 🚀 CONTRACTOR UI LOCKDOWN (Safely at the top!)
-  if (isContractorUser()) {
-    const qrContainer = clone.getElementById("sms-quick-reply-container");
-    if (qrContainer) qrContainer.style.display = "none";
-
-    const inputBox = clone.getElementById("sms-input-box");
-    if (inputBox && inputBox.parentNode)
-      inputBox.parentNode.style.display = "none";
-
-    const sendBtn = clone.getElementById("btn-send-sms");
-    if (sendBtn) sendBtn.style.display = "none";
-  }
-
   const contactsToday =
     typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
   const textEl = clone.getElementById("myleads-contact-text");
@@ -2065,10 +2090,26 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   // ==========================================
   // 🚀 4. STYLE THE TABS & POPULATE BADGES
   // ==========================================
+  // 🚀 UPDATED: Inject the new No Reply tab dynamically if it doesn't exist in HTML
+  let noreplyTab = clone.getElementById("tab-ml-noreply");
+  if (!noreplyTab) {
+    const tabContainer = clone.getElementById("tab-ml-new").parentNode;
+    noreplyTab = document.createElement("div");
+    noreplyTab.id = "tab-ml-noreply";
+    noreplyTab.onclick = () => renderMyLeads("noreply");
+    noreplyTab.style.cssText =
+      "color: var(--text-2); font-weight: 600; cursor: pointer; padding-bottom: 12px; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap;";
+    noreplyTab.innerHTML = `No Reply <span id="badge-ml-noreply" style="background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">0</span>`;
+
+    // Insert it right before the New Leads tab
+    tabContainer.insertBefore(noreplyTab, clone.getElementById("tab-ml-new"));
+  }
+
   const tabsUI = {
     callbacks: clone.getElementById("tab-ml-callbacks"),
     yes: clone.getElementById("tab-ml-yes"),
     followup: clone.getElementById("tab-ml-followup"),
+    noreply: clone.getElementById("tab-ml-noreply"), // 🚀 Add to styling map
     new: clone.getElementById("tab-ml-new"),
   };
 
@@ -2095,6 +2136,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   updateBadge("badge-ml-callbacks", buckets.callbacks.length);
   updateBadge("badge-ml-yes", buckets.yes.length);
   updateBadge("badge-ml-followup", buckets.followup.length);
+  updateBadge("badge-ml-noreply", buckets.noreply.length); // 🚀 Update new badge
   updateBadge("badge-ml-new", buckets.new.length);
 
   // ==========================================
@@ -2138,12 +2180,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const activeLead = myLeads[_currentFeedIndex];
   const qrContainer = clone.getElementById("sms-quick-reply-container");
 
-  if (
-    !isContractorUser() &&
-    qrContainer &&
-    typeof Config !== "undefined" &&
-    Config.smsTemplates
-  ) {
+  if (qrContainer && typeof Config !== "undefined" && Config.smsTemplates) {
     Object.keys(Config.smsTemplates).forEach((key) => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -3068,6 +3105,8 @@ function renderAssignLeads() {
   }
 
   const { leads, contractors } = State;
+
+  // 🚀 THE FIX: Restored strict !l.assignedTo check so we never rip leads
   const unassigned = leads.filter(function (l) {
     const isValidLead = l && l.id && (l.name || l.phone || l.BTN || l.btn);
     const isAvailable =
@@ -3142,7 +3181,7 @@ function renderAssignLeads() {
     <div class="view-header" style="margin-bottom: 16px;">
       <div>
         <h1 class="view-title">Assign Leads</h1>
-        <span class="view-subtitle">// ${unassigned.length} total unassigned</span>
+        <span class="view-subtitle">// ${unassigned.length} total assignable</span>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn-cyan" onclick="navigate('drip')">Drip Feed Mode</button>
@@ -3160,15 +3199,17 @@ function renderAssignLeads() {
       <select id="bulk-type-select" class="form-input" style="width: 120px;"><option value="all">Any Type</option></select>
       <select id="bulk-state-select" class="form-input" style="width: 120px;"><option value="all">Any State</option></select>
       
+      <select id="bulk-lead-status-select" class="form-input" style="width: 160px;">
+        <option value="all">Any Status</option>
+        <option value="new">New Leads Only</option>
+        <option value="no_reply">No Reply (1st/2nd/3rd Contact)</option>
+      </select>
+      
       <select id="bulk-sort-select" class="form-input" style="width: 150px;">
         <option value="newest">Sort: Newest First</option>
         <option value="least_worked">Sort: Least Worked</option>
         <option value="most_worked">Sort: Most Worked</option>
       </select>
-
-      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#0D1B3E; cursor:pointer; margin-left:8px;">
-        <input type="checkbox" id="bulk-unworked-check" style="cursor:pointer; width:15px; height:15px;"> Unworked Only
-      </label>
 
       <button id="assign-reset-filters" class="btn-ghost" style="padding: 6px; margin-left: auto;" title="Reset Filters">
         <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#64748B" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
@@ -3209,7 +3250,7 @@ function renderAssignLeads() {
     <div class="card">
       <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
         <div>
-          <h2 class="card-title">Unassigned Leads Preview</h2>
+          <h2 class="card-title">Assign/Reassign Queue</h2>
           <span class="card-meta" id="table-meta-count">Loading...</span>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
@@ -3231,11 +3272,12 @@ function renderAssignLeads() {
   // 3. Internal Pointers
   let currentPage = 1;
   const itemsPerPage = 25;
-  const unworkedCheck = document.getElementById("bulk-unworked-check");
   const typeSelect = document.getElementById("bulk-type-select");
   const stateSelect = document.getElementById("bulk-state-select");
   const batchSelect = document.getElementById("bulk-batch-select");
   const sortSelect = document.getElementById("bulk-sort-select");
+  const statusSelect = document.getElementById("bulk-lead-status-select");
+
   const qtyInput = document.getElementById("bulk-agent-qty");
   const countDisplay = document.getElementById("bulk-type-count");
   const resetFiltersBtn = document.getElementById("assign-reset-filters");
@@ -3296,17 +3338,29 @@ function renderAssignLeads() {
     const selectedState = stateSelect ? stateSelect.value : "all";
     const selectedBatch = batchSelect ? batchSelect.value : "all";
     const selectedSort = sortSelect ? sortSelect.value : "newest";
-    const requireUnworked = unworkedCheck ? unworkedCheck.checked : false;
+    const selectedStatusFilter = statusSelect ? statusSelect.value : "all";
 
     const filteredLeads = unassigned.filter(function (l) {
+      // 🚀 THE NEW STATUS FILTER LOGIC
+      let passesStatusFilter = true;
+      if (selectedStatusFilter === "new") {
+        passesStatusFilter = l.status === "New";
+      } else if (selectedStatusFilter === "no_reply") {
+        passesStatusFilter = [
+          "1st Contact",
+          "2nd Contact",
+          "3rd Contact",
+        ].includes(l.status);
+      }
+
       return (
+        passesStatusFilter &&
         (selectedType === "all" ||
           (l.leadType &&
             l.leadType.toLowerCase() === selectedType.toLowerCase())) &&
         (selectedState === "all" ||
           (l.state && l.state.toUpperCase() === selectedState.toUpperCase())) &&
-        (selectedBatch === "all" || l._batchId === selectedBatch) &&
-        (!requireUnworked || (!l.previousAgents && !l.currentMRC))
+        (selectedBatch === "all" || l._batchId === selectedBatch)
       );
     });
 
@@ -3372,14 +3426,16 @@ function renderAssignLeads() {
             : [];
           const prevBadge =
             prevArray.length > 0
-              ? `<span title="${escHtml(lead.previousAgents)}" style="font-size:10px; background:#f1f5f9; color:#64748b; padding:2px 6px; border-radius:4px; margin-left:8px; font-weight:600; cursor:help;">↺ ${prevArray.length} prev agents</span>`
+              ? `<span title="${escHtml(lead.previousAgents)}" style="font-size:10px; background:#f1f5f9; color:#64748b; padding:2px 6px; border-radius:4px; margin-left:8px; font-weight:600; cursor:help;">↺ ${prevArray.length} prev</span>`
               : "";
 
           return `
         <tr>
           <td>
-            <div style="display:flex; align-items:center;">
-              <span class="lead-name">${escHtml(lead.name)}</span>${prevBadge}
+            <div style="display:flex; flex-direction:column;">
+              <div style="display:flex; align-items:center;">
+                <span class="lead-name">${escHtml(lead.name)}</span>${prevBadge}
+              </div>
             </div>
           </td>
           <td>${lead.leadType ? `<span class="lead-type-badge lead-type-${(lead.leadType || "").toLowerCase()}">${escHtml(lead.leadType)}</span>` : "—"}</td>
@@ -3417,7 +3473,7 @@ function renderAssignLeads() {
   );
 
   // 6. Attach Event Listeners
-  const triggers = [unworkedCheck, typeSelect, stateSelect, sortSelect];
+  const triggers = [statusSelect, typeSelect, stateSelect, sortSelect];
   triggers.forEach(
     (el) =>
       el &&
@@ -3435,40 +3491,27 @@ function renderAssignLeads() {
     agentSelect.addEventListener("change", (e) => {
       const selectedAgent = e.target.value;
 
-      // Hide badge if no agent is selected
       if (!selectedAgent) {
         readinessBadge.style.display = "none";
         return;
       }
 
-      // Calculate how many leads are TRULY workable right now
       const activeLeadsCount = State.leads.filter((lead) => {
-        // 1. Must be assigned to this specific agent
         if (lead.assignedTo !== selectedAgent) return false;
-
-        // 2. Must not be in a terminal status (Sold, Dead, etc.)
         if (Config.terminalStatuses.includes(lead.status || "New"))
           return false;
-
-        // 3. Must not be in the cool-off period
         if (Graph.isInCoolOff(lead)) return false;
 
-        // 🚀 4. THE FIX: Ignore leads with future callback dates
         if (lead.callbackAt) {
           const cbTime = new Date(lead.callbackAt).getTime();
           const nowTime = new Date().getTime();
-
-          // If the callback is in the future, it is NOT an active lead right now
           if (cbTime > nowTime) {
             return false;
           }
         }
-
-        // If it passes all gates, it is an active, workable lead blocking their queue
         return true;
       }).length;
 
-      // Update the UI
       readinessBadge.style.display = "inline-flex";
 
       if (activeLeadsCount === 0) {
@@ -3497,7 +3540,7 @@ function renderAssignLeads() {
       if (typeSelect) typeSelect.value = "all";
       if (stateSelect) stateSelect.value = "all";
       if (sortSelect) sortSelect.value = "newest";
-      if (unworkedCheck) unworkedCheck.checked = false;
+      if (statusSelect) statusSelect.value = "all";
 
       currentPage = 1;
       updateDynamicDropdowns();
@@ -3558,7 +3601,6 @@ async function assignLead(leadId) {
 }
 
 async function bulkAssignToSelectedAgent() {
-  // Grab all the dropdown values (including the new Batch and Sort!)
   const agentSelect = document.getElementById("bulk-agent-select");
   const agentName = agentSelect ? agentSelect.value : "";
 
@@ -3577,21 +3619,25 @@ async function bulkAssignToSelectedAgent() {
   const sortSelect = document.getElementById("bulk-sort-select");
   const selectedSort = sortSelect ? sortSelect.value : "newest";
 
-  const unworkedCheck = document.getElementById("bulk-unworked-check");
-  const requireUnworked = unworkedCheck ? unworkedCheck.checked : false;
+  // 🚀 GRAB NEW STATUS FILTER
+  const statusSelect = document.getElementById("bulk-lead-status-select");
+  const selectedStatusFilter = statusSelect ? statusSelect.value : "all";
 
   if (!agentName) {
-    UI.showToast("Please select an agent first.", "warning");
+    if (typeof UI !== "undefined" && UI.showToast)
+      UI.showToast("Please select an agent first.", "warning");
     return;
   }
   if (!qty || qty <= 0) {
-    UI.showToast("Please enter a valid number of leads.", "warning");
+    if (typeof UI !== "undefined" && UI.showToast)
+      UI.showToast("Please enter a valid number of leads.", "warning");
     return;
   }
 
-  // 1. Get the base unassigned pool
+  // 1. Get the base unassigned pool (Must be unassigned & not dead)
   const unassigned = State.leads.filter(function (l) {
     const isValidLead = l && l.id && (l.name || l.phone || l.BTN || l.btn);
+    // 🚀 CRITICAL BOUNCER: Must be unassigned (we don't rip leads) AND not a terminal status
     const isAvailable =
       !l.assignedTo && !Config.terminalStatuses.includes(l.status);
     return isValidLead && isAvailable;
@@ -3599,6 +3645,16 @@ async function bulkAssignToSelectedAgent() {
 
   // 2. Filter using the EXACT same rules as the table preview
   const validLeads = unassigned.filter(function (l) {
+    // 🚀 STATUS MATCH LOGIC
+    let statusMatch = true;
+    if (selectedStatusFilter === "new") {
+      statusMatch = l.status === "New";
+    } else if (selectedStatusFilter === "no_reply") {
+      statusMatch = ["1st Contact", "2nd Contact", "3rd Contact"].includes(
+        l.status,
+      );
+    }
+
     const typeMatch =
       selectedType === "all" ||
       (l.leadType && l.leadType.toLowerCase() === selectedType.toLowerCase());
@@ -3606,18 +3662,13 @@ async function bulkAssignToSelectedAgent() {
       selectedState === "all" ||
       (l.state && l.state.toUpperCase() === selectedState.toUpperCase());
 
-    // Check our new dynamic batch tags
     const batchMatch = selectedBatch === "all" || l._batchId === selectedBatch;
-
-    // Check if it's completely untouched
-    const unworkedMatch =
-      !requireUnworked || (!l.previousAgents && !l.currentMRC);
 
     // 🛑 CRITICAL BOUNCER: Make sure the selected agent hasn't worked this lead before!
     const prevAgents = (l.previousAgents || "").toLowerCase();
     const agentMatch = !prevAgents.includes(agentName.toLowerCase());
 
-    return typeMatch && stateMatch && batchMatch && unworkedMatch && agentMatch;
+    return statusMatch && typeMatch && stateMatch && batchMatch && agentMatch;
   });
 
   // 3. SORT USING THE EXACT SAME RULES AS THE TABLE PREVIEW 🚀
@@ -3644,32 +3695,36 @@ async function bulkAssignToSelectedAgent() {
     }
   });
 
-  // Dynamic labels for the Toast notification
+  const statusLabel = selectedStatusFilter === "no_reply" ? "No Reply " : "";
   const stateLabel = selectedState === "all" ? "" : `${selectedState} `;
   const typeLabel = selectedType === "all" ? "leads" : `${selectedType} leads`;
-  const combinedLabel = `${stateLabel}${typeLabel}`.trim();
+  const combinedLabel = `${statusLabel}${stateLabel}${typeLabel}`.trim();
 
   // 4. Validation Checks
   if (validLeads.length === 0) {
-    UI.showToast(
-      `${agentName} has no available ${combinedLabel} left to work with these filters!`,
-      "warning",
-    );
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `${agentName} has no available ${combinedLabel} left to work with these filters!`,
+        "warning",
+      );
+    }
     return;
   }
 
   if (qty > validLeads.length) {
-    UI.showToast(
-      `Only ${validLeads.length} ${combinedLabel} available for ${agentName} (already worked the rest).`,
-      "warning",
-    );
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `Only ${validLeads.length} ${combinedLabel} available for ${agentName} (already worked the rest).`,
+        "warning",
+      );
+    }
     return;
   }
 
   // 5. Slice from the newly sorted top!
   const leadsToAssign = validLeads.slice(0, qty);
 
-  setLoading(true);
+  if (typeof setLoading === "function") setLoading(true);
   try {
     await Promise.all(
       leadsToAssign.map(async (lead) => {
@@ -3678,16 +3733,20 @@ async function bulkAssignToSelectedAgent() {
       }),
     );
 
-    UI.showToast(
-      `Successfully assigned ${qty} ${combinedLabel} to ${agentName}!`,
-      "success",
-    );
-    renderAssignLeads();
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `Successfully assigned ${qty} ${combinedLabel} to ${agentName}!`,
+        "success",
+      );
+    }
+    if (typeof renderAssignLeads === "function") renderAssignLeads();
   } catch (err) {
     console.error("Bulk Assign Error:", err);
-    UI.showToast("Failed to assign leads: " + err.message, "error");
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast("Failed to assign leads: " + err.message, "error");
+    }
   } finally {
-    setLoading(false);
+    if (typeof setLoading === "function") setLoading(false);
   }
 }
 
@@ -4673,9 +4732,8 @@ function renderLeads() {
           <p style="margin:0; font-size:13px; color:#666;">What type of leads are in this file?</p>
         </div>
         <select id="tempLeadType" class="filter-select" style="width:100%; padding:10px; border-radius:6px;">
-          <option value="OFS">OFS Leads</option>
+          <option value="Contractor">Contractor Leads</option>
           <option value="MLR">MLR Leads</option>
-          <option value="Forced">Forced Leads</option>
         </select>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
           <button id="cancelTypeBtn" class="btn-ghost" style="padding:8px 16px;">Cancel</button>
@@ -4773,7 +4831,7 @@ function renderLeads() {
       .map((t) => `<option value="${t}">${t}</option>`)
       .join("");
 
-    // 🚀 INJECTED: The new Delete Batch Trash Can Button
+    // 🚀 INJECTED: The new Delete Batch Trash Can Button AND Unassign No Replies Button
     agentFilter.parentNode.insertAdjacentHTML(
       "beforeend",
       `
@@ -4800,6 +4858,10 @@ function renderLeads() {
         <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#64748B" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
       </button>
 
+      <button id="leads-unassign-noreplies" class="btn-ghost" style="padding: 6px; color: #f97316; margin-left: 4px;" title="Unassign All No Replies">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 6v1h12v-1a6 6 0 00-6-6zM21 12h-6" /></svg>
+      </button>
+
       <button id="leads-delete-batch" class="btn-ghost" style="padding: 6px; color: #ef4444;" title="Delete Selected Batch">
         <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
       </button>
@@ -4812,7 +4874,8 @@ function renderLeads() {
   const typeFilter = clone.querySelector("#filter-type");
   const sortFilter = clone.querySelector("#filter-sort");
   const resetFiltersBtn = clone.querySelector("#leads-reset-filters");
-  const deleteBatchBtn = clone.querySelector("#leads-delete-batch"); // 🚀 The New Button Pointer
+  const deleteBatchBtn = clone.querySelector("#leads-delete-batch");
+  const unassignNoRepliesBtn = clone.querySelector("#leads-unassign-noreplies"); // 🚀 The new pointer
 
   if (batchFilter && State.filters.batch)
     batchFilter.value = State.filters.batch;
@@ -4835,7 +4898,6 @@ function renderLeads() {
         return;
       }
 
-      // 🚀 THE WYSIWYG FIX:
       // 1. Grab the base list respecting global filters (Search, Status, Agent)
       let baseLeads =
         typeof getFilteredLeads === "function"
@@ -4904,7 +4966,6 @@ function renderLeads() {
         const idsToDelete = leadsToDelete.map((l) => l.id);
 
         try {
-          // 🚀 THE SOFT DELETE LOOP (With nested try/catch)
           const updatePromises = idsToDelete.map(async (id) => {
             try {
               await Graph.updateLead(id, { Status: "Deleted" });
@@ -4915,31 +4976,25 @@ function renderLeads() {
             }
           });
 
-          // Wait for all promises to resolve
           const results = await Promise.all(updatePromises);
-
-          // Filter out the successful ones
           const successfulIds = results
             .filter((res) => res.success === true)
             .map((res) => res.id);
-
           const failedCount = results.length - successfulIds.length;
 
-          // 3. Immediately wipe successful ones from the local State so the UI feels fast
           State.leads = State.leads.filter(
             (l) => !successfulIds.includes(l.id),
           );
 
-          // 4. Clean the local IndexedDB instantly
           for (const id of successfulIds) {
-            await LocalDB.deleteItem("leads", id);
+            if (typeof LocalDB !== "undefined")
+              await LocalDB.deleteItem("leads", id);
           }
 
-          // 5. Reset the batch filter so they don't look at an empty/broken table
           State.filters.batch = "all";
 
           overlay.remove();
-          renderLeads(); // Force the screen to redraw
+          renderLeads();
 
           if (failedCount > 0) {
             alert(
@@ -4956,6 +5011,114 @@ function renderLeads() {
           confirmBtn.disabled = false;
         }
       };
+    });
+  }
+
+  // ==========================================
+  // 🚀 THE BULK UNASSIGN NO REPLIES WORKFLOW
+  // ==========================================
+  if (unassignNoRepliesBtn) {
+    unassignNoRepliesBtn.addEventListener("click", () => {
+      // 1. Grab base list respecting global filters
+      let baseLeads =
+        typeof getFilteredLeads === "function"
+          ? getFilteredLeads()
+          : State.leads;
+
+      // 2. Grab exact current local dropdowns
+      const selectedBatch = batchFilter ? batchFilter.value : "all";
+      const selectedState = stateFilter ? stateFilter.value : "all";
+      const selectedType = typeFilter ? typeFilter.value : "all";
+
+      // 3. Filter down so we only grab exactly what the user is currently looking at
+      const leadsToUnassign = baseLeads.filter((l) => {
+        const batchMatch =
+          selectedBatch === "all" || l._batchId === selectedBatch;
+        const stateMatch =
+          selectedState === "all" ||
+          (l.state && l.state.toUpperCase() === selectedState.toUpperCase());
+        const typeMatch =
+          selectedType === "all" ||
+          (l.leadType &&
+            l.leadType.toLowerCase() === selectedType.toLowerCase());
+
+        // 🚀 THE MAGIC GATE: Must be assigned AND in a No Reply status
+        const isAssigned = !!l.assignedTo;
+        const isNoReply = [
+          "1st Contact",
+          "2nd Contact",
+          "3rd Contact",
+        ].includes(l.status);
+
+        return batchMatch && stateMatch && typeMatch && isAssigned && isNoReply;
+      });
+
+      if (leadsToUnassign.length === 0) {
+        if (typeof UI !== "undefined" && UI.showToast) {
+          UI.showToast(
+            "No assigned 1st/2nd/3rd Contact leads match your current filters.",
+            "warning",
+          );
+        } else {
+          alert(
+            "No assigned 1st/2nd/3rd Contact leads match your current filters.",
+          );
+        }
+        return;
+      }
+
+      const totalFound = leadsToUnassign.length;
+
+      if (
+        !confirm(
+          `You are about to strip the assigned agent from ${totalFound} "No Reply" leads in this filtered view.\n\nThey will be sent to the unassigned queue. Proceed?`,
+        )
+      ) {
+        return;
+      }
+
+      if (typeof setLoading === "function") setLoading(true);
+
+      const updatePromises = leadsToUnassign.map(async (lead) => {
+        try {
+          await Graph.updateLead(lead.id, { Agent_x0020_Assigned: "" });
+          // Instantly update local state so the UI snaps back
+          lead.assignedTo = "";
+          return { success: true };
+        } catch (err) {
+          console.error(`Failed to unassign lead: ${lead.id}`, err);
+          return { success: false };
+        }
+      });
+
+      Promise.all(updatePromises)
+        .then((results) => {
+          const successCount = results.filter((r) => r.success).length;
+          const failCount = results.length - successCount;
+
+          if (typeof setLoading === "function") setLoading(false);
+          renderLeads();
+
+          if (typeof UI !== "undefined" && UI.showToast) {
+            if (failCount === 0) {
+              UI.showToast(
+                `✅ Successfully unassigned ${successCount} leads!`,
+                "success",
+              );
+            } else {
+              UI.showToast(
+                `⚠️ Unassigned ${successCount} leads, but ${failCount} failed.`,
+                "warning",
+              );
+            }
+          }
+        })
+        .catch((err) => {
+          if (typeof setLoading === "function") setLoading(false);
+          console.error("Batch unassign completely failed", err);
+          if (typeof UI !== "undefined" && UI.showToast)
+            UI.showToast("Network error while unassigning leads.", "error");
+        });
     });
   }
 
@@ -5655,7 +5818,9 @@ async function handleFileSelect(event) {
   const selectedLeadType = event.target.dataset.leadType || "OFS";
   let combinedCSVData = [];
 
-  UI.showToast(`📄 Reading ${files.length} file(s)...`, "info");
+  if (typeof UI !== "undefined" && UI.showToast) {
+    UI.showToast(`📄 Reading ${files.length} file(s)...`, "info");
+  }
 
   // Helper function to turn the FileReader into an awaitable Promise
   const readSingleFile = (file) => {
@@ -5682,13 +5847,15 @@ async function handleFileSelect(event) {
   );
 
   // Send the massive combined list to your uploader
-  // Your "Bouncer" inside this function will automatically filter duplicates across all the files!
   await uploadLeadsToSharePoint(combinedCSVData, selectedLeadType);
 
   // Reset input so they can upload again later
   event.target.value = "";
 }
 
+// ==========================================
+// 📄 1. THE CSV PARSER
+// ==========================================
 // The CSV Parser (Handles quotes and commas flawlessly)
 function parseCSV(text) {
   const lines = text.split("\n").filter((line) => line.trim() !== "");
@@ -5709,22 +5876,49 @@ function parseCSV(text) {
   return data;
 }
 
+// 🚀 MERGED FEATURE: Smart CSV Field Lookup from Frontier LMS
+/**
+ * Smart CSV Field Lookup:
+ * Hunts down a column value in a parsed CSV row regardless of UPPERCASE,
+ * lowercase, or accidental leading/trailing spaces in the column header.
+ */
+function getCSVField(row, candidates) {
+  if (!row || !candidates || !Array.isArray(candidates)) return "";
+
+  // 1. Get all actual column header names present in this CSV row
+  const rowKeys = Object.keys(row);
+
+  for (const candidate of candidates) {
+    // Clean our search term (e.g., "MRC" -> "mrc")
+    const cleanCandidate = String(candidate).trim().toLowerCase();
+
+    // 2. Search row keys case-insensitively
+    const matchingKey = rowKeys.find(
+      (key) => String(key).trim().toLowerCase() === cleanCandidate,
+    );
+
+    // 3. If we find a match and the cell isn't empty, return its trimmed value!
+    if (
+      matchingKey &&
+      row[matchingKey] !== undefined &&
+      row[matchingKey] !== null &&
+      String(row[matchingKey]).trim() !== ""
+    ) {
+      return String(row[matchingKey]).trim();
+    }
+  }
+
+  return "";
+}
+
+// ==========================================
+// 🚀 3. THE UPLOAD ENGINE (Verizon Version)
+// ==========================================
 async function uploadLeadsToSharePoint(csvData, leadType) {
   // ==========================================
   // 🛡️ 1. FLEXIBLE FIELD RESOLVER & CBR BOUNCER
   // ==========================================
-  const getVal = (row, ...keys) => {
-    for (const key of keys) {
-      if (
-        row[key] !== undefined &&
-        row[key] !== null &&
-        String(row[key]).trim() !== ""
-      ) {
-        return String(row[key]).trim();
-      }
-    }
-    return "";
-  };
+  // We use the smarter getCSVField instead of the old getVal now!
 
   // Strips formatting and extracts the last 10 digits
   const cleanPhone = (str) => {
@@ -5744,7 +5938,13 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
   let duplicateCount = 0;
 
   csvData.forEach((row) => {
-    const cbrRaw = getVal(row, "CBR", "BTN", "Phone");
+    // 🚀 MERGED: Support old headers AND new header (CUSTOMERCONTACTPHONE)
+    const cbrRaw = getCSVField(row, [
+      "CBR",
+      "BTN",
+      "Phone",
+      "CUSTOMERCONTACTPHONE",
+    ]);
     const cbrKey = cleanPhone(cbrRaw);
 
     // Skip if CBR is missing (<10 digits) or already exists in memory
@@ -5759,17 +5959,21 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
   const totalLeads = validLeads.length;
 
   if (totalLeads === 0) {
-    UI.showToast(
-      `❌ Upload aborted: All ${csvData.length} leads are duplicates or lack valid 10-digit CBRs.`,
-      "error",
-    );
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `❌ Upload aborted: All ${csvData.length} leads are duplicates or lack valid 10-digit CBRs.`,
+        "error",
+      );
+    }
     return;
   }
 
-  UI.showToast(
-    `🚀 Starting batch upload of ${totalLeads} leads... (Skipped ${duplicateCount} duplicate/invalid rows)`,
-    "info",
-  );
+  if (typeof UI !== "undefined" && UI.showToast) {
+    UI.showToast(
+      `🚀 Starting batch upload of ${totalLeads} leads... (Skipped ${duplicateCount} duplicate/invalid rows)`,
+      "info",
+    );
+  }
 
   // ==========================================
   // 🛑 2. HIJACK THE UI
@@ -5810,20 +6014,44 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
     }
 
     const batchRequests = chunk.map((row, index) => {
-      const first = getVal(row, "First Name", "FirstName");
-      const last = getVal(row, "Last Name", "LastName");
-      const address = getVal(row, "Address", "StreetAddress", "WorkAddress");
-      const city = getVal(row, "City", "WorkCity");
-      const state = getVal(row, "State");
-      const zip = getVal(row, "Zip", "ZipCode");
-      const btn = getVal(row, "BTN", "Phone");
-      const cbr = getVal(row, "CBR");
+      // 🚀 MERGED: Support new headers (CUSTOMERNAME, CUSTOMERADDRESS, CITY, STATE, ZIP)
+      const rawName = getCSVField(row, [
+        "CUSTOMERNAME",
+        "Name",
+        "Customer Name",
+      ]);
+
+      let first = getCSVField(row, ["First Name", "FirstName"]);
+      let last = getCSVField(row, ["Last Name", "LastName"]);
+
+      // If they gave us CUSTOMERNAME instead of First/Last, split it up
+      if (!first && rawName) {
+        const nameParts = rawName.trim().split(" ");
+        first = nameParts[0];
+        last = nameParts.slice(1).join(" ");
+      }
+
+      const address = getCSVField(row, [
+        "Address",
+        "StreetAddress",
+        "WorkAddress",
+        "CUSTOMERADDRESS",
+      ]);
+      const city = getCSVField(row, ["City", "WorkCity", "CITY"]);
+      const state = getCSVField(row, ["State", "STATE"]);
+      const zip = getCSVField(row, ["Zip", "ZipCode", "ZIP"]);
+      const btn = getCSVField(row, ["BTN", "Phone"]);
+      const cbr = getCSVField(row, ["CBR", "CUSTOMERCONTACTPHONE"]);
 
       // 🧠 FRONTIER ACCOUNT HISTORY NOTE COMPILER
-      const installDate = getVal(row, "Install Date");
-      const orderNum = getVal(row, "OrderNumber", "Order Number");
-      const salesAgent = getVal(row, "Sales Agent");
-      const orderDate = getVal(row, "Order Date");
+      const installDate = getCSVField(row, ["Install Date"]);
+      const orderNum = getCSVField(row, [
+        "OrderNumber",
+        "Order Number",
+        "ORDERNO",
+      ]);
+      const salesAgent = getCSVField(row, ["Sales Agent"]);
+      const orderDate = getCSVField(row, ["Order Date", "ORDERCREATEDDATE"]);
 
       let compiledNote = "";
       const noteDetails = [];
@@ -5831,6 +6059,10 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
       if (orderNum) noteDetails.push(`Order #: ${orderNum}`);
       if (salesAgent) noteDetails.push(`Sold By: ${salesAgent}`);
       if (orderDate) noteDetails.push(`Ordered: ${orderDate}`);
+
+      // Look for custom remarks in the new format
+      const remarks = getCSVField(row, ["CUSTOMERREMARKS"]);
+      if (remarks) noteDetails.push(`Remarks: ${remarks}`);
 
       if (noteDetails.length > 0) {
         compiledNote = `[Frontier Fiber Account] ${noteDetails.join(" | ")}`;
@@ -5843,7 +6075,7 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
         headers: { "Content-Type": "application/json" },
         body: {
           fields: {
-            Title: `${first} ${last}`.trim() || "Unknown Lead",
+            Title: `${first} ${last}`.trim() || rawName || "Unknown Lead",
             FirstName: first,
             LastName: last,
             WorkAddress: address, // 🚀 Preserved VZ internal SharePoint name
@@ -5889,7 +6121,7 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
             const errorMsg = res.body?.error?.message || "Unknown Graph Error";
             console.error(
               `❌ Row Rejection [Item #${res.id}]: "${errorMsg}"`,
-              `| Failed Lead: ${getVal(originalRow, "First Name", "FirstName")} ${getVal(originalRow, "Last Name", "LastName")} (${getVal(originalRow, "CBR", "BTN")})`,
+              `| Failed Lead: ${getCSVField(originalRow, ["First Name", "FirstName", "CUSTOMERNAME"])} (${getCSVField(originalRow, ["CBR", "BTN", "CUSTOMERCONTACTPHONE"])})`,
               res.body,
             );
             failCount++;
@@ -5907,7 +6139,9 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
     } catch (error) {
       console.error("❌ Critical batch error:", error);
       failCount += chunk.length;
-      UI.showToast(`⚠️ Network error on batch ${currentBatchNum}.`, "error");
+      if (typeof UI !== "undefined" && UI.showToast) {
+        UI.showToast(`⚠️ Network error on batch ${currentBatchNum}.`, "error");
+      }
     }
 
     processedCount += chunk.length;
@@ -5928,15 +6162,24 @@ async function uploadLeadsToSharePoint(csvData, leadType) {
   }
 
   if (failCount === 0) {
-    UI.showToast(`✅ Upload complete! ${successCount} leads added.`, "success");
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `✅ Upload complete! ${successCount} leads added.`,
+        "success",
+      );
+    }
   } else {
-    UI.showToast(
-      `⚠️ Finished: ${successCount} added, ${failCount} failed. Check DevTools console for exact row errors.`,
-      "warning",
-    );
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `⚠️ Finished: ${successCount} added, ${failCount} failed. Check DevTools console for exact row errors.`,
+        "warning",
+      );
+    }
   }
 
-  await loadAllData();
+  if (typeof loadAllData === "function") {
+    await loadAllData();
+  }
 }
 // ============================================================
 //  DAILY REPORT (Admin only)
