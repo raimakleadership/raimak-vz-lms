@@ -4448,7 +4448,7 @@ const Automation = {
 
     // 🚀 THE CONTRACTOR DAILY LIMIT
     if (typeof isContractorUser === "function" && isContractorUser()) {
-      const dailyLimit = 300;
+      const dailyLimit = 500;
       const alreadyTextedToday =
         typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
 
