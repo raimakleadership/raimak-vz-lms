@@ -6844,22 +6844,27 @@ function getTriageInbox() {
     ? contractor.name.toLowerCase().trim()
     : userName;
 
-  // 1. Filter: Leads with unread messages assigned to this rep
+  // 1. Filter: Leads with unread messages assigned strictly to this rep
   const unreadLeads = (State.leads || []).filter((l) => {
+    // Must be unread to be in triage
     if (!l.SMSUnread && !l.smsUnread) return false;
 
+    // 🚀 ADMIN OVERRIDE: If you want admins to see ALL triage messages, keep this.
+    // If you want admins to ONLY see their own, delete this line!
+    if (typeof isAdmin === "function" && isAdmin()) return true;
+
+    // Clean up the assigned string from SharePoint
     const assigned = (l.assignedTo || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
       .trim();
 
-    // The Bulletproof Matcher
+    // 🚀 THE BULLETPROOF MATCHER
+    // If no one is assigned, they don't see it.
+    if (!assigned) return false;
+
     const matchesAgent =
-      assigned &&
-      (assigned === agentName ||
-        assigned === userName ||
-        assigned === userEmail ||
-        assigned === "michael mcalpine jr."); // Hard fallback
+      assigned === agentName || assigned === userName || assigned === userEmail;
 
     return matchesAgent;
   });
@@ -6904,7 +6909,10 @@ function getTriageInbox() {
     }
 
     // 3. AI Classifier
-    const bucket = SMSBrain.classifyText(msgText);
+    const bucket =
+      typeof SMSBrain !== "undefined"
+        ? SMSBrain.classifyText(msgText)
+        : "Needs Follow-up";
 
     // 4. Apply Dopamine Colors
     let color = "#64748b"; // Default Gray
@@ -7146,7 +7154,7 @@ function copyLeadForTeams(leadId) {
     });
 }
 
-function getTriageSorted(targetStatus) {
+function getTriageSorted(statusTarget) {
   const user = State.currentUser;
   const userName = ((user && user.name) || "").toLowerCase().trim();
   const userEmail = ((user && user.email) || "").toLowerCase().trim();
@@ -7157,24 +7165,27 @@ function getTriageSorted(targetStatus) {
       (c.name || "").toLowerCase().trim() === userName
     );
   });
+
   const agentName = contractor
     ? contractor.name.toLowerCase().trim()
     : userName;
 
-  // 1. Find leads that match the status and belong to this rep
   const sortedLeads = (State.leads || []).filter((l) => {
-    if (l.status !== targetStatus) return false;
+    // 1. Must match the target status (Yes or Do Not Call)
+    if (l.status !== statusTarget) return false;
 
+    // 🚀 ADMIN OVERRIDE: Keep if admins should see all history, delete if they shouldn't
+    if (typeof isAdmin === "function" && isAdmin()) return true;
+
+    // 2. 🚀 THE BULLETPROOF MATCHER
     const assigned = (l.assignedTo || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
       .trim();
+    if (!assigned) return false;
+
     return (
-      assigned &&
-      (assigned === agentName ||
-        assigned === userName ||
-        assigned === userEmail ||
-        assigned === "michael mcalpine jr.")
+      assigned === agentName || assigned === userName || assigned === userEmail
     );
   });
 
@@ -7183,27 +7194,26 @@ function getTriageSorted(targetStatus) {
     (a, b) => new Date(b.modified || 0) - new Date(a.modified || 0),
   );
 
-  // 2. Format them for the Triage UI Cards
   return sortedLeads.map((lead) => {
     let msgText = lead.notes
       ? lead.notes.split("\n")[0]
-      : "No recent notes on file.";
+      : "Sorted by a manual action or bulk workflow.";
 
+    // Attempt to pull the actual text message that triggered this if available
     const rawPhone = lead.cbr || lead.phone || lead.BTN || lead.btn || "";
     const cleanPhone = String(rawPhone).replace(/\D/g, "");
 
     if (cleanPhone.length >= 10) {
       const base10 = cleanPhone.slice(-10);
-      const allowedFormats = [
-        base10,
-        "+1" + base10,
-        "1" + base10,
-        `${base10.slice(0, 3)}-${base10.slice(3, 6)}-${base10.slice(6)}`,
-      ];
+      const plus1 = "+1" + base10;
+      const just1 = "1" + base10;
+      const dashed = `${base10.slice(0, 3)}-${base10.slice(3, 6)}-${base10.slice(6)}`;
+      const allowedFormats = [base10, plus1, just1, dashed];
 
       const leadMessages = (State.smsHistory || []).filter((m) =>
         allowedFormats.includes(m.cbr),
       );
+
       if (leadMessages.length > 0) {
         leadMessages.sort(
           (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
@@ -7213,6 +7223,8 @@ function getTriageSorted(targetStatus) {
         );
         if (newestInbound && newestInbound.message) {
           msgText = newestInbound.message;
+        } else if (leadMessages[0].message) {
+          msgText = leadMessages[0].message;
         }
       }
     }
@@ -7222,8 +7234,8 @@ function getTriageSorted(targetStatus) {
       name: lead.name || "Unknown Lead",
       cbr: lead.cbr || lead.phone || "---",
       message: msgText,
-      suggestedBucket: targetStatus.toUpperCase(),
-      badgeColor: targetStatus === "Yes" ? "#00e676" : "#ff3b30",
+      suggestedBucket: statusTarget.toUpperCase(),
+      badgeColor: statusTarget === "Yes" ? "#00e676" : "#ff3b30",
     };
   });
 }
