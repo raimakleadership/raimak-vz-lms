@@ -4121,6 +4121,32 @@ function renderAutomation() {
     });
   }
 
+  // 🚀 NEW: Dynamically inject the Reset Button for Non-Contractors
+  const isContractor =
+    typeof isContractorUser === "function" && isContractorUser();
+  if (!isContractor) {
+    // Hunt down the Save button to append the Reset button right next to it
+    const saveBtn = clone.querySelector(
+      'button[onclick*="saveCurrentTemplate"]',
+    );
+    if (saveBtn) {
+      const resetBtn = document.createElement("button");
+      resetBtn.className = "btn-ghost";
+      resetBtn.style.cssText =
+        "color: #f97316; margin-left: 8px; padding: 6px 12px; font-size: 13px;";
+      resetBtn.innerHTML = `
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px; margin-top: -2px;">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        Reset to Default
+      `;
+      resetBtn.onclick = () => Automation.resetCurrentTemplate();
+
+      // Insert right after the save button
+      saveBtn.parentNode.insertBefore(resetBtn, saveBtn.nextSibling);
+    }
+  }
+
   mainContent.appendChild(clone);
 
   // Initialize presets and load eligible audience table
@@ -4385,6 +4411,9 @@ const Automation = {
     const charCountEl = document.getElementById("auto-char-count");
     if (!textarea || !previewEl) return;
 
+    // 🚀 THE FIX: Force the HTML to respect \n line breaks
+    previewEl.style.whiteSpace = "pre-wrap";
+
     const rawText = textarea.value;
 
     if (charCountEl) {
@@ -4634,6 +4663,47 @@ const Automation = {
           "error",
         );
       } else alert("⚠️ All campaign messages failed to send or were skipped.");
+    }
+  },
+
+  resetCurrentTemplate() {
+    // 🚀 SECURITY WALL
+    if (typeof isContractorUser === "function" && isContractorUser()) return;
+
+    const key = this.currentTemplateKey;
+    if (!Config.smsTemplates || !Config.smsTemplates[key]) {
+      if (typeof UI !== "undefined" && UI.showToast)
+        UI.showToast(
+          "No default configuration found for this preset.",
+          "error",
+        );
+      return;
+    }
+
+    if (
+      !confirm(
+        `Are you sure you want to reset the "${key.toUpperCase()}" template?\n\nThis will permanently erase your custom edits and restore the master version.`,
+      )
+    ) {
+      return;
+    }
+
+    // Overwrite local storage with the default from Config
+    const templates = this.getTemplates();
+    templates[key] = Config.smsTemplates[key];
+    localStorage.setItem("RaimakSMSTemplates", JSON.stringify(templates));
+
+    // Update the textarea visually
+    const textarea = document.getElementById("auto-template-body");
+    if (textarea) textarea.value = Config.smsTemplates[key];
+
+    this.updatePreview();
+
+    if (typeof UI !== "undefined" && UI.showToast) {
+      UI.showToast(
+        `✅ "${key.toUpperCase()}" template reset to default!`,
+        "success",
+      );
     }
   },
 };
@@ -6848,10 +6918,6 @@ function getTriageInbox() {
   const unreadLeads = (State.leads || []).filter((l) => {
     // Must be unread to be in triage
     if (!l.SMSUnread && !l.smsUnread) return false;
-
-    // 🚀 ADMIN OVERRIDE: If you want admins to see ALL triage messages, keep this.
-    // If you want admins to ONLY see their own, delete this line!
-    if (typeof isAdmin === "function" && isAdmin()) return true;
 
     // Clean up the assigned string from SharePoint
     const assigned = (l.assignedTo || "")
