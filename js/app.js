@@ -1836,13 +1836,9 @@ let _currentFeedIndex = 0;
 window._currentMyLeadsTab = window._currentMyLeadsTab || null;
 
 function renderMyLeads(tab = window._currentMyLeadsTab) {
-  // 🚀 THE ULTIMATE CONTRACTOR BOUNCER
-  if (typeof isContractorUser === "function" && isContractorUser()) {
-    if (typeof UI !== "undefined" && UI.showToast) {
-      UI.showToast("Access Restricted: Routing to Triage Inbox", "error");
-    }
-    if (typeof switchView === "function") return switchView("triage");
-    return;
+  if (isContractorUser()) {
+    UI.showToast("Access Restricted: Routing to Triage Inbox", "error");
+    return switchView("triage");
   }
 
   if (typeof _leadSaved === "undefined") window._leadSaved = false;
@@ -1861,11 +1857,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
         : null;
 
     let tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (
-      leadState &&
-      typeof stateTimezones !== "undefined" &&
-      stateTimezones[leadState]
-    ) {
+    if (leadState && stateTimezones[leadState]) {
       tz = stateTimezones[leadState];
     }
     try {
@@ -1899,22 +1891,17 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     ? contractor.name.toLowerCase().trim()
     : userName;
 
-  // ==========================================
-  // 🛑 1. BASE FILTER
-  // ==========================================
   let hiddenByTimezone = 0;
   const filterNow = new Date();
   const tzHourCache = {};
 
   const baseLeads = State.leads.filter((l) => {
-    // 🚀 THE NEW VERIFIED GATE: Must be a Yes OR a manual follow-up
+    // 🚀 We only look for manual Agent contacts here now
     const isManualFollowUp = [
       "1st Contact",
       "2nd Contact",
       "3rd Contact",
     ].includes(l.status);
-
-    // If it's not a VerifiedYes AND not a manual follow-up, dump it
     if (!l.verifiedYes && l.status !== "Yes" && !isManualFollowUp) return false;
 
     const assigned = (l.assignedTo || "")
@@ -1929,9 +1916,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
 
     if (!matchesAgent) return false;
     if (Config.terminalStatuses.includes(l.status)) return false;
-
-    // Remove the block on 3rd contact so they can finish the cadence
-    // if (l.status === "3rd Contact") return false;
 
     if (
       window._skippedSessionLeads &&
@@ -1959,7 +1943,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       }
     }
 
-    // 🚀 UNREAD OVERRIDE: If the customer texted us, they bypass ALL hiding rules!
     const hasUnread = l.SMSUnread === true || l.smsUnread === true;
 
     if (waitingForDate && !hasUnread) return false;
@@ -1967,8 +1950,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
 
     if (l.state) {
       let tz = "America/New_York";
-      if (typeof stateTimezones !== "undefined" && stateTimezones[l.state])
-        tz = stateTimezones[l.state];
+      if (stateTimezones[l.state]) tz = stateTimezones[l.state];
+
       if (tzHourCache[tz] === undefined) {
         try {
           tzHourCache[tz] = parseInt(
@@ -1984,8 +1967,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
         }
       }
       const localHour = tzHourCache[tz];
-
-      // 🚀 UNREAD OVERRIDE: Allow unread messages to bypass the 8 PM - 8 AM curfew
       if (localHour < 8 || localHour >= 20) {
         if (!hasUnread) {
           hiddenByTimezone++;
@@ -1997,28 +1978,14 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     return true;
   });
 
-  // ==========================================
-  // 🛑 2. BUCKET THE POST-YES LEADS
-  // ==========================================
-  const buckets = {
-    callbacks: [],
-    yes: [],
-    followup: [],
-    noreply: [], // 🚀 NEW: The bucket for manual text/call cadence
-    new: [],
-  };
-
+  const buckets = { callbacks: [], yes: [], followup: [], new: [] };
   const fiveMinsFromNow = Date.now() + 5 * 60000;
 
   baseLeads.forEach((l) => {
     const isCallbackDue =
       l.callbackAt && new Date(l.callbackAt).getTime() <= fiveMinsFromNow;
-
     const isUnread = l.SMSUnread || l.smsUnread;
     const isFresh = l.status === "Yes" || l.status === "New";
-    const isNoReply =
-      ["1st Contact", "2nd Contact", "3rd Contact"].includes(l.status) &&
-      !l.verifiedYes;
 
     if (isCallbackDue) {
       buckets.callbacks.push(l);
@@ -2026,8 +1993,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       buckets.yes.push(l);
     } else if (isFresh) {
       buckets.new.push(l);
-    } else if (isNoReply) {
-      buckets.noreply.push(l); // Drops them in the new manual cadence tab
     } else {
       buckets.followup.push(l);
     }
@@ -2041,40 +2006,37 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     const bTime = b.lastContacted ? new Date(b.lastContacted).getTime() : 0;
     return aTime - bTime;
   });
-  buckets.noreply.sort((a, b) => {
-    const aTime = a.lastContacted ? new Date(a.lastContacted).getTime() : 0;
-    const bTime = b.lastContacted ? new Date(b.lastContacted).getTime() : 0;
-    return aTime - bTime; // Oldest contact attempt first
-  });
   buckets.yes.sort((a, b) => a.id.localeCompare(b.id));
   buckets.new.sort((a, b) => a.id.localeCompare(b.id));
 
-  // ==========================================
-  // 🛑 3. AUTO-SELECT BEST TAB IF NONE SELECTED
-  // ==========================================
-  if (!tab) {
-    if (buckets.callbacks.length > 0) tab = "callbacks";
-    else if (buckets.yes.length > 0) tab = "yes";
-    else if (buckets.followup.length > 0) tab = "followup";
-    else if (buckets.noreply.length > 0)
-      tab = "noreply"; // 🚀 Priority routing
-    else tab = "new";
-  }
+  let myLeads = [];
+  const adminView = isAdmin();
 
-  window._currentMyLeadsTab = tab;
-
-  // 🚀 THE FIX: The Bypass Lane for Searched Leads
-  let myLeads;
   if (window._forceShowLead && window._myLeads && window._myLeads.length > 0) {
-    myLeads = window._myLeads; // Keep the injected search lead intact!
-  } else {
+    myLeads = window._myLeads;
+  } else if (adminView) {
+    if (!tab || tab === "noreply") {
+      if (buckets.callbacks.length > 0) tab = "callbacks";
+      else if (buckets.yes.length > 0) tab = "yes";
+      else if (buckets.followup.length > 0) tab = "followup";
+      else tab = "new";
+    }
+    window._currentMyLeadsTab = tab;
     myLeads = buckets[tab] || [];
-    window._myLeads = myLeads; // Normal behavior: overwrite with the bucket
+  } else {
+    // 🚀 AGENT WORKFLOW: Unified Queue (No Replies are now just "New")
+    myLeads = [
+      ...buckets.callbacks,
+      ...buckets.followup,
+      ...buckets.yes,
+      ...buckets.new,
+    ];
   }
 
+  window._myLeads = myLeads;
   window._agentName = agentName;
   _leadSaved = false;
-  window._forceShowLead = false; // Turn the bypass lane back off so normal navigation works after
+  window._forceShowLead = false;
 
   const mainContent = document.getElementById("main-content");
   mainContent.innerHTML = "";
@@ -2082,66 +2044,49 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const template = document.getElementById("tmpl-my-leads");
   const clone = template.content.cloneNode(true);
 
-  const contactsToday =
-    typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
+  const contactsToday = getMyContactsToday();
   const textEl = clone.getElementById("myleads-contact-text");
   if (textEl) textEl.textContent = contactsToday;
 
-  // ==========================================
-  // 🚀 4. STYLE THE TABS & POPULATE BADGES
-  // ==========================================
-  // 🚀 UPDATED: Inject the new No Reply tab dynamically if it doesn't exist in HTML
-  let noreplyTab = clone.getElementById("tab-ml-noreply");
-  if (!noreplyTab) {
-    const tabContainer = clone.getElementById("tab-ml-new").parentNode;
-    noreplyTab = document.createElement("div");
-    noreplyTab.id = "tab-ml-noreply";
-    noreplyTab.onclick = () => renderMyLeads("noreply");
-    noreplyTab.style.cssText =
-      "color: var(--text-2); font-weight: 600; cursor: pointer; padding-bottom: 12px; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap;";
-    noreplyTab.innerHTML = `No Reply <span id="badge-ml-noreply" style="background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">0</span>`;
+  if (!adminView) {
+    const newTabEl = clone.getElementById("tab-ml-new");
+    if (newTabEl && newTabEl.parentNode) {
+      newTabEl.parentNode.style.display = "none";
+    }
+  } else {
+    const tabsUI = {
+      callbacks: clone.getElementById("tab-ml-callbacks"),
+      yes: clone.getElementById("tab-ml-yes"),
+      followup: clone.getElementById("tab-ml-followup"),
+      new: clone.getElementById("tab-ml-new"),
+    };
 
-    // Insert it right before the New Leads tab
-    tabContainer.insertBefore(noreplyTab, clone.getElementById("tab-ml-new"));
+    Object.keys(tabsUI).forEach((key) => {
+      if (tabsUI[key]) {
+        if (key === tab) {
+          tabsUI[key].style.color = "var(--text-1)";
+          tabsUI[key].style.borderBottomColor = "#38bdf8";
+        } else {
+          tabsUI[key].style.color = "var(--text-2)";
+          tabsUI[key].style.borderBottomColor = "transparent";
+        }
+      }
+    });
+
+    const updateBadge = (id, count) => {
+      const b = clone.getElementById(id);
+      if (b) {
+        b.textContent = count;
+        b.style.opacity = count > 0 ? "1" : "0.3";
+      }
+    };
+
+    updateBadge("badge-ml-callbacks", buckets.callbacks.length);
+    updateBadge("badge-ml-yes", buckets.yes.length);
+    updateBadge("badge-ml-followup", buckets.followup.length);
+    updateBadge("badge-ml-new", buckets.new.length);
   }
 
-  const tabsUI = {
-    callbacks: clone.getElementById("tab-ml-callbacks"),
-    yes: clone.getElementById("tab-ml-yes"),
-    followup: clone.getElementById("tab-ml-followup"),
-    noreply: clone.getElementById("tab-ml-noreply"), // 🚀 Add to styling map
-    new: clone.getElementById("tab-ml-new"),
-  };
-
-  Object.keys(tabsUI).forEach((key) => {
-    if (tabsUI[key]) {
-      if (key === tab) {
-        tabsUI[key].style.color = "var(--text-1)";
-        tabsUI[key].style.borderBottomColor = "#38bdf8";
-      } else {
-        tabsUI[key].style.color = "var(--text-2)";
-        tabsUI[key].style.borderBottomColor = "transparent";
-      }
-    }
-  });
-
-  const updateBadge = (id, count) => {
-    const b = clone.getElementById(id);
-    if (b) {
-      b.textContent = count;
-      b.style.opacity = count > 0 ? "1" : "0.3";
-    }
-  };
-
-  updateBadge("badge-ml-callbacks", buckets.callbacks.length);
-  updateBadge("badge-ml-yes", buckets.yes.length);
-  updateBadge("badge-ml-followup", buckets.followup.length);
-  updateBadge("badge-ml-noreply", buckets.noreply.length); // 🚀 Update new badge
-  updateBadge("badge-ml-new", buckets.new.length);
-
-  // ==========================================
-  // 🛑 5. EMPTY QUEUE STATE FOR TAB
-  // ==========================================
   const subtitleEl = clone.getElementById("myleads-subtitle");
   const feedWrap = clone.getElementById("lead-feed-wrap");
 
@@ -2149,7 +2094,10 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     _currentFeedIndex = 0;
     if (window._clockTimer) clearInterval(window._clockTimer);
 
-    if (subtitleEl) subtitleEl.textContent = `// 0 remaining in this tab`;
+    if (subtitleEl)
+      subtitleEl.textContent = adminView
+        ? `// 0 remaining in this tab`
+        : `// Queue clear`;
 
     if (feedWrap) {
       const sleepingBannerHTML =
@@ -2162,25 +2110,22 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       feedWrap.innerHTML = `
         <div class="card" style="text-align:center; padding:60px 20px;">
           <div style="font-size:4rem; margin-bottom:20px;">☕</div>
-          <h2 class="view-title">Tab Clear!</h2>
-          <p style="color:var(--text-3); margin-bottom:${hiddenByTimezone > 0 ? "16px" : "24px"};">No leads currently require action in this bucket.</p>
+          <h2 class="view-title">${adminView ? "Tab Clear!" : "Queue Clear!"}</h2>
+          <p style="color:var(--text-3); margin-bottom:${hiddenByTimezone > 0 ? "16px" : "24px"};">No leads currently require action.</p>
           ${sleepingBannerHTML}
-          <button class="btn-primary" onclick="this.innerHTML='Syncing...'; this.disabled=true; typeof loadAllData === 'function' ? loadAllData() : window.location.reload();">Check for Updates</button>
+          <button class="btn-primary" onclick="this.innerHTML='Syncing...'; this.disabled=true; loadAllData();">Check for Updates</button>
         </div>`;
     }
 
     mainContent.appendChild(clone);
-    if (typeof SMS !== "undefined") SMS.loadConversation(null);
+    SMS.loadConversation(null);
     return;
   }
 
-  // ==========================================
-  // 🚀 6. DYNAMIC QUICK REPLIES INJECTOR
-  // ==========================================
   const activeLead = myLeads[_currentFeedIndex];
   const qrContainer = clone.getElementById("sms-quick-reply-container");
 
-  if (qrContainer && typeof Config !== "undefined" && Config.smsTemplates) {
+  if (qrContainer && Config.smsTemplates) {
     Object.keys(Config.smsTemplates).forEach((key) => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -2190,30 +2135,25 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       btn.textContent = "+ " + key.charAt(0).toUpperCase() + key.slice(1);
 
       btn.onclick = () => {
-        if (typeof SMS !== "undefined" && SMS.insertQuickReply) {
-          let txt = Config.smsTemplates[key];
-          if (activeLead) {
-            const cleanName =
-              activeLead.firstName ||
-              (activeLead.name ? activeLead.name.split(" ")[0] : "there");
-            const cleanAgent =
-              window._agentName.split(" ")[0] || "your Verizon specialist";
-            const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
-
-            txt = txt.replace(/{FirstName}/gi, cleanName);
-            txt = txt.replace(/{AgentName}/gi, cleanAgent);
-            txt = txt.replace(/{BTN}/gi, cleanBTN);
-          }
-          SMS.insertQuickReply(txt);
+        let txt = Config.smsTemplates[key];
+        if (activeLead) {
+          const cleanName =
+            activeLead.firstName ||
+            (activeLead.name ? activeLead.name.split(" ")[0] : "there");
+          const cleanAgent =
+            window._agentName.split(" ")[0] || "your Verizon specialist";
+          const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
+          txt = txt
+            .replace(/{FirstName}/gi, cleanName)
+            .replace(/{AgentName}/gi, cleanAgent)
+            .replace(/{BTN}/gi, cleanBTN);
         }
+        SMS.insertQuickReply(txt);
       };
       qrContainer.appendChild(btn);
     });
   }
 
-  // ==========================================
-  //  7. THE RENDER LOGIC
-  // ==========================================
   if (subtitleEl) {
     subtitleEl.textContent = `// ${myLeads.length} remaining · lead ${_currentFeedIndex + 1} of ${myLeads.length}`;
   }
@@ -2224,10 +2164,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   }
 
   mainContent.appendChild(clone);
-
-  if (typeof SMS !== "undefined") {
-    SMS.loadConversation(activeLead);
-  }
+  SMS.loadConversation(activeLead);
 
   updateClock();
   if (window._clockTimer) clearInterval(window._clockTimer);
@@ -3106,7 +3043,6 @@ function renderAssignLeads() {
 
   const { leads, contractors } = State;
 
-  // 🚀 THE FIX: Restored strict !l.assignedTo check so we never rip leads
   const unassigned = leads.filter(function (l) {
     const isValidLead = l && l.id && (l.name || l.phone || l.BTN || l.btn);
     const isAvailable =
@@ -3199,10 +3135,10 @@ function renderAssignLeads() {
       <select id="bulk-type-select" class="form-input" style="width: 120px;"><option value="all">Any Type</option></select>
       <select id="bulk-state-select" class="form-input" style="width: 120px;"><option value="all">Any State</option></select>
       
-      <select id="bulk-lead-status-select" class="form-input" style="width: 160px;">
+      <select id="bulk-lead-status-select" class="form-input" style="width: 190px;">
         <option value="all">Any Status</option>
         <option value="new">New Leads Only</option>
-        <option value="no_reply">No Reply (1st/2nd/3rd Contact)</option>
+        <option value="no_reply">No Reply (SMS Contacted)</option>
       </select>
       
       <select id="bulk-sort-select" class="form-input" style="width: 150px;">
@@ -3346,11 +3282,7 @@ function renderAssignLeads() {
       if (selectedStatusFilter === "new") {
         passesStatusFilter = l.status === "New";
       } else if (selectedStatusFilter === "no_reply") {
-        passesStatusFilter = [
-          "1st Contact",
-          "2nd Contact",
-          "3rd Contact",
-        ].includes(l.status);
+        passesStatusFilter = l.status === "SMS Contacted";
       }
 
       return (
@@ -3563,7 +3495,6 @@ function renderAssignLeads() {
   updateDynamicDropdowns();
   updateTableAndMath();
 }
-
 async function assignLead(leadId) {
   const select = document.getElementById("assign-" + leadId);
   const agent = select && select.value;
@@ -3619,40 +3550,31 @@ async function bulkAssignToSelectedAgent() {
   const sortSelect = document.getElementById("bulk-sort-select");
   const selectedSort = sortSelect ? sortSelect.value : "newest";
 
-  // 🚀 GRAB NEW STATUS FILTER
   const statusSelect = document.getElementById("bulk-lead-status-select");
   const selectedStatusFilter = statusSelect ? statusSelect.value : "all";
 
   if (!agentName) {
-    if (typeof UI !== "undefined" && UI.showToast)
-      UI.showToast("Please select an agent first.", "warning");
+    UI.showToast("Please select an agent first.", "warning");
     return;
   }
   if (!qty || qty <= 0) {
-    if (typeof UI !== "undefined" && UI.showToast)
-      UI.showToast("Please enter a valid number of leads.", "warning");
+    UI.showToast("Please enter a valid number of leads.", "warning");
     return;
   }
 
-  // 1. Get the base unassigned pool (Must be unassigned & not dead)
   const unassigned = State.leads.filter(function (l) {
     const isValidLead = l && l.id && (l.name || l.phone || l.BTN || l.btn);
-    // 🚀 CRITICAL BOUNCER: Must be unassigned (we don't rip leads) AND not a terminal status
     const isAvailable =
       !l.assignedTo && !Config.terminalStatuses.includes(l.status);
     return isValidLead && isAvailable;
   });
 
-  // 2. Filter using the EXACT same rules as the table preview
   const validLeads = unassigned.filter(function (l) {
-    // 🚀 STATUS MATCH LOGIC
     let statusMatch = true;
     if (selectedStatusFilter === "new") {
       statusMatch = l.status === "New";
     } else if (selectedStatusFilter === "no_reply") {
-      statusMatch = ["1st Contact", "2nd Contact", "3rd Contact"].includes(
-        l.status,
-      );
+      statusMatch = l.status === "SMS Contacted";
     }
 
     const typeMatch =
@@ -3661,17 +3583,14 @@ async function bulkAssignToSelectedAgent() {
     const stateMatch =
       selectedState === "all" ||
       (l.state && l.state.toUpperCase() === selectedState.toUpperCase());
-
     const batchMatch = selectedBatch === "all" || l._batchId === selectedBatch;
 
-    // 🛑 CRITICAL BOUNCER: Make sure the selected agent hasn't worked this lead before!
     const prevAgents = (l.previousAgents || "").toLowerCase();
     const agentMatch = !prevAgents.includes(agentName.toLowerCase());
 
     return statusMatch && typeMatch && stateMatch && batchMatch && agentMatch;
   });
 
-  // 3. SORT USING THE EXACT SAME RULES AS THE TABLE PREVIEW 🚀
   validLeads.sort((a, b) => {
     const countA = a.previousAgents
       ? a.previousAgents.split(",").filter((x) => x.trim()).length
@@ -3700,53 +3619,55 @@ async function bulkAssignToSelectedAgent() {
   const typeLabel = selectedType === "all" ? "leads" : `${selectedType} leads`;
   const combinedLabel = `${statusLabel}${stateLabel}${typeLabel}`.trim();
 
-  // 4. Validation Checks
   if (validLeads.length === 0) {
-    if (typeof UI !== "undefined" && UI.showToast) {
-      UI.showToast(
-        `${agentName} has no available ${combinedLabel} left to work with these filters!`,
-        "warning",
-      );
-    }
+    UI.showToast(
+      `${agentName} has no available ${combinedLabel} left to work with these filters!`,
+      "warning",
+    );
     return;
   }
 
   if (qty > validLeads.length) {
-    if (typeof UI !== "undefined" && UI.showToast) {
-      UI.showToast(
-        `Only ${validLeads.length} ${combinedLabel} available for ${agentName} (already worked the rest).`,
-        "warning",
-      );
-    }
+    UI.showToast(
+      `Only ${validLeads.length} ${combinedLabel} available for ${agentName}.`,
+      "warning",
+    );
     return;
   }
 
-  // 5. Slice from the newly sorted top!
   const leadsToAssign = validLeads.slice(0, qty);
 
-  if (typeof setLoading === "function") setLoading(true);
+  setLoading(true);
   try {
     await Promise.all(
       leadsToAssign.map(async (lead) => {
-        await Graph.updateLead(lead.id, { Agent_x0020_Assigned: agentName });
+        const payload = { Agent_x0020_Assigned: agentName };
+
+        // 🚀 THE RESET: Convert ghosted blasts into fresh Agent Leads
+        if (lead.status === "SMS Contacted") {
+          payload.Status = "New";
+          payload.Lead_x0020_Type = "Agent Lead"; // Must match SharePoint internal column name
+
+          // Snap the UI instantly
+          lead.status = "New";
+          lead.leadType = "Agent Lead";
+        }
+
+        await Graph.updateLead(lead.id, payload);
         lead.assignedTo = agentName;
       }),
     );
 
-    if (typeof UI !== "undefined" && UI.showToast) {
-      UI.showToast(
-        `Successfully assigned ${qty} ${combinedLabel} to ${agentName}!`,
-        "success",
-      );
-    }
-    if (typeof renderAssignLeads === "function") renderAssignLeads();
+    UI.showToast(
+      `Successfully assigned ${qty} ${combinedLabel} to ${agentName}!`,
+      "success",
+    );
+    renderAssignLeads();
   } catch (err) {
     console.error("Bulk Assign Error:", err);
-    if (typeof UI !== "undefined" && UI.showToast) {
-      UI.showToast("Failed to assign leads: " + err.message, "error");
-    }
+    UI.showToast("Failed to assign leads: " + err.message, "error");
   } finally {
-    if (typeof setLoading === "function") setLoading(false);
+    setLoading(false);
   }
 }
 
@@ -4093,73 +4014,47 @@ function completeCallbackLead(leadId) {
 // 📢 AUTOMATION & MASS MESSAGING CONTROLLER
 // ============================================================
 function renderAutomation() {
-  const mainContent = document.getElementById("main-content");
-  if (!mainContent) return;
+  if (!isAdmin() && !isContractorUser()) {
+    UI.showToast(
+      "Access Restricted: Automation is for Admins and Contractors only.",
+      "error",
+    );
+    return switchView("myleads");
+  }
 
+  const mainContent = document.getElementById("main-content");
   mainContent.innerHTML = "";
 
   const template = document.getElementById("tmpl-automation");
-  if (!template) {
-    mainContent.innerHTML = `<div class="empty-state">Automation template missing from index.html.</div>`;
-    return;
-  }
-
   const clone = template.content.cloneNode(true);
 
-  // 🚀 NEW: Dynamically populate the Post-Message Status Dropdown
-  const postStatusSelect = clone.getElementById("auto-post-status");
-  if (
-    postStatusSelect &&
-    typeof Config !== "undefined" &&
-    Config.leadStatuses
-  ) {
-    Config.leadStatuses.forEach((s) => {
-      const opt = document.createElement("option");
-      opt.value = s;
-      opt.textContent = `Change status to: ${s}`;
-      postStatusSelect.appendChild(opt);
-    });
-  }
-
-  // 🚀 NEW: Dynamically inject the Reset Button for Non-Contractors
-  const isContractor =
-    typeof isContractorUser === "function" && isContractorUser();
-  if (!isContractor) {
-    // Hunt down the Save button to append the Reset button right next to it
+  if (!isContractorUser()) {
     const saveBtn = clone.querySelector(
       'button[onclick*="saveCurrentTemplate"]',
     );
-    if (saveBtn) {
-      const resetBtn = document.createElement("button");
-      resetBtn.className = "btn-ghost";
-      resetBtn.style.cssText =
-        "color: #f97316; margin-left: 8px; padding: 6px 12px; font-size: 13px;";
-      resetBtn.innerHTML = `
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px; margin-top: -2px;">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        Reset to Default
-      `;
-      resetBtn.onclick = () => Automation.resetCurrentTemplate();
-
-      // Insert right after the save button
-      saveBtn.parentNode.insertBefore(resetBtn, saveBtn.nextSibling);
-    }
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "btn-ghost";
+    resetBtn.style.cssText =
+      "color: #f97316; margin-left: 8px; padding: 6px 12px; font-size: 13px;";
+    resetBtn.innerHTML = `
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px; margin-top: -2px;">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+      Reset to Default
+    `;
+    resetBtn.onclick = () => Automation.resetCurrentTemplate();
+    saveBtn.parentNode.insertBefore(resetBtn, saveBtn.nextSibling);
   }
 
   mainContent.appendChild(clone);
 
-  // Initialize presets and load eligible audience table
   Automation.loadTemplate("initial");
   Automation.filterAudience();
 
-  // 🚀 THE FIX: Restore button lock if they navigated away and came back!
   if (Automation.isBlastRunning) {
     const launchBtn = document.getElementById("btn-launch-campaign");
-    if (launchBtn) {
-      launchBtn.disabled = true;
-      launchBtn.innerHTML = `<span>BLAST IN PROGRESS...</span>`;
-    }
+    launchBtn.disabled = true;
+    launchBtn.innerHTML = `<span>BLAST IN PROGRESS...</span>`;
   }
 }
 
@@ -4457,37 +4352,29 @@ const Automation = {
   // 10. Mass Blast Launcher with Sequential 1.5s A2P 10DLC Throttling & Background Support
   async launchMassBlast() {
     if (this.isBlastRunning) {
-      if (typeof UI !== "undefined" && UI.showToast)
-        UI.showToast(
-          "A campaign is already running in the background!",
-          "warning",
-        );
+      UI.showToast(
+        "A campaign is already running in the background!",
+        "warning",
+      );
       return;
     }
 
     const selectedIds = Array.from(this.selectedRecipients);
     if (!selectedIds.length) {
-      if (typeof UI !== "undefined" && UI.showToast)
-        return UI.showToast(
-          "Please check at least one recipient first.",
-          "warning",
-        );
+      UI.showToast("Please check at least one recipient first.", "warning");
       return alert("Please check at least one recipient first.");
     }
 
     // 🚀 THE CONTRACTOR DAILY LIMIT
-    if (typeof isContractorUser === "function" && isContractorUser()) {
-      const dailyLimit = 500;
-      const alreadyTextedToday =
-        typeof getMyContactsToday === "function" ? getMyContactsToday() : 0;
+    if (isContractorUser()) {
+      const dailyLimit = 300;
+      const alreadyTextedToday = getMyContactsToday();
 
       if (alreadyTextedToday >= dailyLimit) {
-        if (typeof UI !== "undefined" && UI.showToast) {
-          UI.showToast(
-            `Daily limit of ${dailyLimit} reached. Great work today!`,
-            "error",
-          );
-        }
+        UI.showToast(
+          `Daily limit of ${dailyLimit} reached. Great work today!`,
+          "error",
+        );
         return alert(
           `You have hit your daily outbound limit of ${dailyLimit} leads. Time to work your inbox!`,
         );
@@ -4495,12 +4382,10 @@ const Automation = {
 
       if (alreadyTextedToday + selectedIds.length > dailyLimit) {
         const remainingAllowed = dailyLimit - alreadyTextedToday;
-        if (typeof UI !== "undefined" && UI.showToast) {
-          UI.showToast(
-            `You can only send ${remainingAllowed} more messages today.`,
-            "warning",
-          );
-        }
+        UI.showToast(
+          `You can only send ${remainingAllowed} more messages today.`,
+          "warning",
+        );
         return alert(
           `You are trying to blast ${selectedIds.length} leads, but you only have ${remainingAllowed} texts left in your daily limit. Please uncheck some leads.`,
         );
@@ -4510,18 +4395,16 @@ const Automation = {
     const templateText =
       (document.getElementById("auto-template-body") || {}).value || "";
     if (!templateText.trim()) {
-      if (typeof UI !== "undefined" && UI.showToast)
-        return UI.showToast("Template copy cannot be empty.", "error");
+      UI.showToast("Template copy cannot be empty.", "error");
       return alert("Template copy cannot be empty.");
     }
 
-    const isContractor =
-      typeof isContractorUser === "function" && isContractorUser();
+    const isContractor = isContractorUser();
     const postStatusSelect = document.getElementById("auto-post-status");
 
-    // 🚀 CONTRACTOR POST-ACTION LOCK: Always force "1st Contact"
+    // 🚀 CONTRACTOR POST-ACTION LOCK: Always force to the new handoff status
     const targetStatus = isContractor
-      ? "1st Contact"
+      ? "SMS Contacted"
       : postStatusSelect
         ? postStatusSelect.value
         : "no_change";
@@ -4544,23 +4427,22 @@ const Automation = {
     let failCount = 0;
     const total = selectedIds.length;
 
-    if (typeof UI !== "undefined" && UI.showToast) {
-      UI.showToast(
-        `Campaign initiated for ${total} leads. You can safely navigate away.`,
-        "info",
-      );
-    }
+    UI.showToast(
+      `Campaign initiated for ${total} leads. You can safely navigate away.`,
+      "info",
+    );
 
     for (let i = 0; i < total; i++) {
       const id = selectedIds[i];
-      const lead = (State.leads || []).find((l) => l.id === id);
+      const lead = State.leads.find((l) => l.id === id);
 
       if (!lead || lead.SMSOptOut === true || lead.smsOptOut === true) {
         failCount++;
         continue;
       }
 
-      const rawPhone = lead.phone || lead.cbr || lead.CBR || "";
+      const rawPhone =
+        lead.cbr || lead.CBR || lead.phone || lead.btn || lead.BTN || "";
       const cleanPhone = String(rawPhone).replace(/\D/g, "");
       if (cleanPhone.length < 10) {
         failCount++;
@@ -4591,12 +4473,10 @@ const Automation = {
       if (activeLaunchBtn) {
         activeLaunchBtn.innerHTML = `<span>SENDING (${i + 1}/${total})...</span>`;
       } else if ((i + 1) % 10 === 0) {
-        if (typeof UI !== "undefined" && UI.showToast) {
-          UI.showToast(
-            `Background Campaign: ${i + 1}/${total} messages processed...`,
-            "info",
-          );
-        }
+        UI.showToast(
+          `Background Campaign: ${i + 1}/${total} messages processed...`,
+          "info",
+        );
       }
 
       try {
@@ -4611,7 +4491,7 @@ const Automation = {
         }
         sentCount++;
 
-        if (typeof Graph !== "undefined" && Graph.logActivity) {
+        if (Graph.logActivity) {
           await Graph.logActivity({
             LeadID: lead.id,
             Title: lead.name || "Unknown",
@@ -4619,7 +4499,7 @@ const Automation = {
               targetStatus !== "no_change"
                 ? `Status: ${targetStatus}`
                 : "SMS: Campaign Outbound",
-            AgentEmail: (State.currentUser && State.currentUser.email) || "",
+            AgentEmail: State.currentUser?.email || "",
             Notes: `Campaign SMS sent: "${personalizedBody.slice(0, 50)}..."${statusLogAppend}`,
           });
         }
@@ -4647,22 +4527,15 @@ const Automation = {
     }
 
     if (sentCount > 0) {
-      if (typeof UI !== "undefined" && UI.showToast) {
-        UI.showToast(
-          `✅ Broadcast finished: ${sentCount} sent, ${failCount} skipped/failed.`,
-          "success",
-        );
-      } else
-        alert(
-          `✅ Broadcast finished: ${sentCount} sent, ${failCount} skipped/failed.`,
-        );
+      UI.showToast(
+        `✅ Broadcast finished: ${sentCount} sent, ${failCount} skipped/failed.`,
+        "success",
+      );
     } else {
-      if (typeof UI !== "undefined" && UI.showToast) {
-        UI.showToast(
-          "⚠️ All campaign messages failed to send or were skipped.",
-          "error",
-        );
-      } else alert("⚠️ All campaign messages failed to send or were skipped.");
+      UI.showToast(
+        "⚠️ All campaign messages failed to send or were skipped.",
+        "error",
+      );
     }
   },
 
@@ -5112,13 +4985,9 @@ function renderLeads() {
           (l.leadType &&
             l.leadType.toLowerCase() === selectedType.toLowerCase());
 
-        // 🚀 THE MAGIC GATE: Must be assigned AND in a No Reply status
+        // 🚀 THE NEW MAGIC GATE: Must be assigned AND sitting in "SMS Contacted"
         const isAssigned = !!l.assignedTo;
-        const isNoReply = [
-          "1st Contact",
-          "2nd Contact",
-          "3rd Contact",
-        ].includes(l.status);
+        const isNoReply = l.status === "SMS Contacted";
 
         return batchMatch && stateMatch && typeMatch && isAssigned && isNoReply;
       });
@@ -5126,12 +4995,12 @@ function renderLeads() {
       if (leadsToUnassign.length === 0) {
         if (typeof UI !== "undefined" && UI.showToast) {
           UI.showToast(
-            "No assigned 1st/2nd/3rd Contact leads match your current filters.",
+            "No assigned 'SMS Contacted' leads match your current filters.",
             "warning",
           );
         } else {
           alert(
-            "No assigned 1st/2nd/3rd Contact leads match your current filters.",
+            "No assigned 'SMS Contacted' leads match your current filters.",
           );
         }
         return;
@@ -5141,7 +5010,7 @@ function renderLeads() {
 
       if (
         !confirm(
-          `You are about to strip the assigned agent from ${totalFound} "No Reply" leads in this filtered view.\n\nThey will be sent to the unassigned queue. Proceed?`,
+          `You are about to strip the assigned agent from ${totalFound} automated "SMS Contacted" leads in this view.\n\nThey will be sent back to the unassigned queue. Proceed?`,
         )
       ) {
         return;
