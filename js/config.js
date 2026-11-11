@@ -62,7 +62,7 @@ const Config = {
   soldStatus: "Sold",
 
   // Lead types
-  leadTypes: ["Contractor", "MLR", "Forced"],
+  leadTypes: ["Contractor", "MLR", "Forced", "Agent Lead"],
 
   // Current products options — alphabetical
   currentProducts: [
@@ -111,7 +111,7 @@ const Config = {
   // 📱 Verizon Quick Message Templates
   smsTemplates: {
     initial:
-      "Hi {FirstName}, this is {AgentName} reaching out on behalf of Frontier by Verizon!\nAs a Frontier customer, you may qualify for Verizon wireless plans as low as $30/line, exclusive switching offers, and deals on new phones!\nAre you currently with AT&T, T-Mobile, Spectrum, Xfinity, Cricket, Boost, or another wireless provider?\n\nReply YES and a Verizon Specialist will give you a call with a personalized quote!\nReply STOP to opt out.",
+      "Hi {FirstName}, this is {AgentName} on behalf of Frontier by Verizon! Do you currently use AT&T, T-Mobile, Spectrum Mobile, Xfinity Mobile, Boost, Cricket, or another wireless provider? As a Frontier customer, you may qualify for Verizon plans as low as $30/line, special switcher promotions, and discounts on new phones.\nReply YES if you'd like to see what Verizon offers are available for your account.\n\nReply STOP to opt out.",
     followup:
       "Hi {FirstName}, following up on your Verizon & Frontier bundle savings! Don't leave that $15/mo Frontier bill discount and free Verizon perk on the table. Want me to run a quick quote for your mobile lines today?\n\nReply STOP to opt out.",
     scheduling:
