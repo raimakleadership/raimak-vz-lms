@@ -1896,7 +1896,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const tzHourCache = {};
 
   const baseLeads = State.leads.filter((l) => {
-    // 🚀 THE FIX: Explicitly allow "New" leads into the queue alongside active follow-ups!
+    // 🚀 Explicitly allow "New" leads into the queue alongside active follow-ups!
     const currentStatus = l.status || "New";
     const validQueueStatuses = [
       "New",
@@ -1906,7 +1906,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       "3rd Contact",
     ];
 
-    // If it's not a VerifiedYes AND its status isn't in our valid list above, dump it
     if (!l.verifiedYes && !validQueueStatuses.includes(currentStatus))
       return false;
 
@@ -2128,36 +2127,53 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     return;
   }
 
+  // ==========================================
+  // 🚀 DYNAMIC QUICK REPLIES & SMS COMPOSER TOGGLE
+  // ==========================================
   const activeLead = myLeads[_currentFeedIndex];
+
   const qrContainer = clone.getElementById("sms-quick-reply-container");
+  const smsInputBox = clone.getElementById("sms-input-box");
+  const smsComposerWrapper = smsInputBox
+    ? smsInputBox.closest("div[style*='padding: 16px 20px']")
+    : null;
 
-  if (qrContainer && Config.smsTemplates) {
-    Object.keys(Config.smsTemplates).forEach((key) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn-ghost-sm";
-      btn.style.cssText =
-        "background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32; transition: all 0.2s;";
-      btn.textContent = "+ " + key.charAt(0).toUpperCase() + key.slice(1);
+  if (!adminView) {
+    // Standard Agents: Hide the texting tools so they use their personal phones
+    if (smsComposerWrapper) smsComposerWrapper.style.display = "none";
+    if (qrContainer) qrContainer.style.display = "none";
+  } else {
+    // Admins: Keep the texting tools active
+    if (smsComposerWrapper) smsComposerWrapper.style.display = "block";
 
-      btn.onclick = () => {
-        let txt = Config.smsTemplates[key];
-        if (activeLead) {
-          const cleanName =
-            activeLead.firstName ||
-            (activeLead.name ? activeLead.name.split(" ")[0] : "there");
-          const cleanAgent =
-            window._agentName.split(" ")[0] || "your Verizon specialist";
-          const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
-          txt = txt
-            .replace(/{FirstName}/gi, cleanName)
-            .replace(/{AgentName}/gi, cleanAgent)
-            .replace(/{BTN}/gi, cleanBTN);
-        }
-        SMS.insertQuickReply(txt);
-      };
-      qrContainer.appendChild(btn);
-    });
+    if (qrContainer && Config.smsTemplates) {
+      Object.keys(Config.smsTemplates).forEach((key) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn-ghost-sm";
+        btn.style.cssText =
+          "background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32; transition: all 0.2s;";
+        btn.textContent = "+ " + key.charAt(0).toUpperCase() + key.slice(1);
+
+        btn.onclick = () => {
+          let txt = Config.smsTemplates[key];
+          if (activeLead) {
+            const cleanName =
+              activeLead.firstName ||
+              (activeLead.name ? activeLead.name.split(" ")[0] : "there");
+            const cleanAgent =
+              window._agentName.split(" ")[0] || "your Verizon specialist";
+            const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
+            txt = txt
+              .replace(/{FirstName}/gi, cleanName)
+              .replace(/{AgentName}/gi, cleanAgent)
+              .replace(/{BTN}/gi, cleanBTN);
+          }
+          SMS.insertQuickReply(txt);
+        };
+        qrContainer.appendChild(btn);
+      });
+    }
   }
 
   if (subtitleEl) {
@@ -2170,6 +2186,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   }
 
   mainContent.appendChild(clone);
+
   SMS.loadConversation(activeLead);
 
   updateClock();
