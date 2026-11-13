@@ -1896,13 +1896,19 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const tzHourCache = {};
 
   const baseLeads = State.leads.filter((l) => {
-    // 🚀 We only look for manual Agent contacts here now
-    const isManualFollowUp = [
+    // 🚀 THE FIX: Explicitly allow "New" leads into the queue alongside active follow-ups!
+    const currentStatus = l.status || "New";
+    const validQueueStatuses = [
+      "New",
+      "Yes",
       "1st Contact",
       "2nd Contact",
       "3rd Contact",
-    ].includes(l.status);
-    if (!l.verifiedYes && l.status !== "Yes" && !isManualFollowUp) return false;
+    ];
+
+    // If it's not a VerifiedYes AND its status isn't in our valid list above, dump it
+    if (!l.verifiedYes && !validQueueStatuses.includes(currentStatus))
+      return false;
 
     const assigned = (l.assignedTo || "")
       .toLowerCase()
@@ -2024,7 +2030,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     window._currentMyLeadsTab = tab;
     myLeads = buckets[tab] || [];
   } else {
-    // 🚀 AGENT WORKFLOW: Unified Queue (No Replies are now just "New")
+    // 🚀 AGENT WORKFLOW: Unified Queue
     myLeads = [
       ...buckets.callbacks,
       ...buckets.followup,
