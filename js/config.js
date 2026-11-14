@@ -43,6 +43,7 @@ const Config = {
     "3rd Contact",
     "Do Not Call",
     "Already has VZ",
+    "Sold",
     "Yes",
   ],
 
@@ -90,8 +91,7 @@ const Config = {
 
   roles: {
     admins: [
-      "m.mcalpine@raimak.com",
-      "RichardZacker@raimak.com",
+      "m.mclpine@raimak.com",
       "B.Hinesley@raimak.com",
       "S.Balleste@raimak.com",
       "N.Caldwell@raimak.com",

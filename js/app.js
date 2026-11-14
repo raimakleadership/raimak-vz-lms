@@ -4388,7 +4388,6 @@ const Automation = {
       return alert("Please check at least one recipient first.");
     }
 
-    // 🚀 THE CONTRACTOR DAILY LIMIT
     if (isContractorUser()) {
       const dailyLimit = 300;
       const alreadyTextedToday = getMyContactsToday();
@@ -4422,20 +4421,10 @@ const Automation = {
       return alert("Template copy cannot be empty.");
     }
 
-    const isContractor = isContractorUser();
-    const postStatusSelect = document.getElementById("auto-post-status");
-
-    // 🚀 CONTRACTOR POST-ACTION LOCK: Always force to the new handoff status
-    const targetStatus = isContractor
-      ? "SMS Contacted"
-      : postStatusSelect
-        ? postStatusSelect.value
-        : "no_change";
-
-    const statusNotice =
-      targetStatus !== "no_change"
-        ? `\n\nTheir status will automatically be updated to: "${targetStatus}".`
-        : "";
+    // 🚀 UNIVERSAL HANDOFF ENFORCER: No dropdowns, no "no_change".
+    // Every single mass blast forces the lead to "SMS Contacted".
+    const targetStatus = "SMS Contacted";
+    const statusNotice = `\n\nTheir status will automatically be updated to: "${targetStatus}".`;
 
     if (
       !confirm(
@@ -4472,7 +4461,6 @@ const Automation = {
         continue;
       }
 
-      // 🚀 FIRST NAME ONLY
       const agentFirstName =
         State.currentUser && State.currentUser.name
           ? State.currentUser.name.trim().split(/\s+/)[0]
@@ -4504,26 +4492,21 @@ const Automation = {
 
       try {
         const cbrToSend = cleanPhone.slice(-10);
-        await Graph.sendTextMessage(cbrToSend, personalizedBody);
-        let statusLogAppend = "";
+        // 1. Send the text via Twilio
+        await SMSApi.sendTextMessage(cbrToSend, personalizedBody);
 
-        if (targetStatus !== "no_change") {
-          await Graph.updateLead(lead.id, { Status: targetStatus });
-          lead.status = targetStatus;
-          statusLogAppend = ` & Status updated to ${targetStatus}`;
-        }
+        // 2. Immediately force the SharePoint update
+        await Graph.updateLead(lead.id, { Status: targetStatus });
+        lead.status = targetStatus;
         sentCount++;
 
         if (Graph.logActivity) {
           await Graph.logActivity({
             LeadID: lead.id,
             Title: lead.name || "Unknown",
-            ActionType:
-              targetStatus !== "no_change"
-                ? `Status: ${targetStatus}`
-                : "SMS: Campaign Outbound",
+            ActionType: `Status: ${targetStatus}`,
             AgentEmail: State.currentUser?.email || "",
-            Notes: `Campaign SMS sent: "${personalizedBody.slice(0, 50)}..."${statusLogAppend}`,
+            Notes: `Campaign SMS sent: "${personalizedBody.slice(0, 50)}..." & Status updated to ${targetStatus}`,
           });
         }
       } catch (err) {
