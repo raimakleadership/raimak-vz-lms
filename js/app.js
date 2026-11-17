@@ -1857,9 +1857,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
         : null;
 
     let tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (leadState && stateTimezones[leadState]) {
-      tz = stateTimezones[leadState];
-    }
+    if (leadState && stateTimezones[leadState]) tz = stateTimezones[leadState];
+
     try {
       clockEl.textContent = new Date().toLocaleTimeString([], {
         hour: "2-digit",
@@ -1896,7 +1895,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   const tzHourCache = {};
 
   const baseLeads = State.leads.filter((l) => {
-    // 🚀 Explicitly allow "New" leads into the queue alongside active follow-ups!
     const currentStatus = l.status || "New";
     const validQueueStatuses = [
       "New",
@@ -1920,8 +1918,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
         assigned === userEmail.replace(/\s+/g, " "));
 
     if (!matchesAgent) return false;
-    if (Config.terminalStatuses.includes(l.status)) return false;
-
+    if (Config.terminalStatuses && Config.terminalStatuses.includes(l.status))
+      return false;
     if (
       window._skippedSessionLeads &&
       window._skippedSessionLeads.includes(l.id)
@@ -1941,11 +1939,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     if (l.callbackAt) {
       const scheduledTime = new Date(l.callbackAt).getTime();
       const dueThreshold = filterNow.getTime() + 5 * 60000;
-      if (scheduledTime > dueThreshold) {
-        waitingForDate = true;
-      } else {
-        isDueCallback = true;
-      }
+      if (scheduledTime > dueThreshold) waitingForDate = true;
+      else isDueCallback = true;
     }
 
     const hasUnread = l.SMSUnread === true || l.smsUnread === true;
@@ -1979,7 +1974,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
         }
       }
     }
-
     return true;
   });
 
@@ -1992,15 +1986,11 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     const isUnread = l.SMSUnread || l.smsUnread;
     const isFresh = l.status === "Yes" || l.status === "New";
 
-    if (isCallbackDue) {
-      buckets.callbacks.push(l);
-    } else if (isUnread) {
-      buckets.yes.push(l);
-    } else if (isFresh) {
-      buckets.new.push(l);
-    } else {
-      buckets.followup.push(l);
-    }
+    if (isCallbackDue) buckets.callbacks.push(l);
+    else if (isUnread)
+      buckets.yes.push(l); // "yes" bucket exclusively holds Unread SMS leads
+    else if (isFresh) buckets.new.push(l);
+    else buckets.followup.push(l);
   });
 
   buckets.callbacks.sort(
@@ -2020,7 +2010,12 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (window._forceShowLead && window._myLeads && window._myLeads.length > 0) {
     myLeads = window._myLeads;
   } else if (adminView) {
-    if (!tab || tab === "noreply") {
+    // 👑 ADMIN 4-TAB RESOLUTION
+    if (
+      !tab ||
+      tab === "noreply" ||
+      !["callbacks", "yes", "followup", "new"].includes(tab)
+    ) {
       if (buckets.callbacks.length > 0) tab = "callbacks";
       else if (buckets.yes.length > 0) tab = "yes";
       else if (buckets.followup.length > 0) tab = "followup";
@@ -2029,13 +2024,19 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     window._currentMyLeadsTab = tab;
     myLeads = buckets[tab] || [];
   } else {
-    // 🚀 AGENT WORKFLOW: Unified Queue
-    myLeads = [
-      ...buckets.callbacks,
-      ...buckets.followup,
-      ...buckets.yes,
-      ...buckets.new,
-    ];
+    // 🚀 AGENT 2-TAB RESOLUTION (Smart Auto-Routing)
+    if (!tab || tab === "noreply" || !["queue", "replies"].includes(tab)) {
+      if (buckets.yes.length > 0)
+        tab = "replies"; // Force to replies if they have unread messages!
+      else tab = "queue";
+    }
+    window._currentMyLeadsTab = tab;
+
+    if (tab === "replies") {
+      myLeads = buckets.yes;
+    } else {
+      myLeads = [...buckets.callbacks, ...buckets.followup, ...buckets.new];
+    }
   }
 
   window._myLeads = myLeads;
@@ -2054,11 +2055,64 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (textEl) textEl.textContent = contactsToday;
 
   if (!adminView) {
-    const newTabEl = clone.getElementById("tab-ml-new");
-    if (newTabEl && newTabEl.parentNode) {
-      newTabEl.parentNode.style.display = "none";
+    // ==========================================
+    // 🚀 SMART 2-TAB AGENT UI BUILDER
+    // ==========================================
+    const tabCallbacks = clone.getElementById("tab-ml-callbacks");
+    const tabFollowup = clone.getElementById("tab-ml-followup");
+    const tabYes = clone.getElementById("tab-ml-yes"); // Repurposed for "New Replies"
+    const tabNew = clone.getElementById("tab-ml-new"); // Repurposed for "My Queue"
+
+    if (tabCallbacks) tabCallbacks.style.display = "none";
+    if (tabFollowup) tabFollowup.style.display = "none";
+
+    const queueCount =
+      buckets.callbacks.length + buckets.followup.length + buckets.new.length;
+    const repliesCount = buckets.yes.length;
+
+    if (tabNew) {
+      tabNew.setAttribute("onclick", "renderMyLeads('queue')");
+      tabNew.innerHTML = `My Queue <span style="background: var(--surface-2); color: var(--text-1); padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px; border: 1px solid var(--border); opacity: ${queueCount > 0 ? "1" : "0.3"}">${queueCount}</span>`;
     }
+
+    if (tabYes) {
+      tabYes.setAttribute("onclick", "renderMyLeads('replies')");
+      tabYes.innerHTML = `New Replies <span style="background: #00e676; color: #0a1a14; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px; opacity: ${repliesCount > 0 ? "1" : "0.3"}">${repliesCount}</span>`;
+
+      // 🚨 DYNAMIC CSS PULSE ANIMATION
+      if (repliesCount > 0) {
+        if (!document.getElementById("style-pulse-replies")) {
+          const style = document.createElement("style");
+          style.id = "style-pulse-replies";
+          style.innerHTML = `
+            @keyframes pulse-replies-text {
+              0% { color: #00e676; text-shadow: 0 0 10px rgba(0,230,118,0.6); }
+              50% { color: var(--text-2); text-shadow: none; }
+              100% { color: #00e676; text-shadow: 0 0 10px rgba(0,230,118,0.6); }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+        tabYes.style.animation = "pulse-replies-text 1.5s infinite";
+      }
+    }
+
+    const tabsUI = { queue: tabNew, replies: tabYes };
+    Object.keys(tabsUI).forEach((key) => {
+      if (tabsUI[key]) {
+        if (key === tab) {
+          tabsUI[key].style.color = "var(--text-1)";
+          tabsUI[key].style.borderBottomColor = "#38bdf8";
+        } else {
+          tabsUI[key].style.color = "var(--text-2)";
+          tabsUI[key].style.borderBottomColor = "transparent";
+        }
+      }
+    });
   } else {
+    // ==========================================
+    // 👑 STANDARD ADMIN 4-TAB UI
+    // ==========================================
     const tabsUI = {
       callbacks: clone.getElementById("tab-ml-callbacks"),
       yes: clone.getElementById("tab-ml-yes"),
@@ -2108,8 +2162,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       const sleepingBannerHTML =
         hiddenByTimezone > 0
           ? `<div style="background: var(--blue-light, #e0e7ff); color: var(--blue-dark, #3730a3); padding: 10px 16px; border-radius: 8px; display: inline-block; margin-bottom: 24px; font-size: 14px; font-weight: 600;">
-              🌙 ${hiddenByTimezone} lead${hiddenByTimezone !== 1 ? "s" : ""} resting outside 8 AM - 8 PM dialing hours.
-            </div><br>`
+            🌙 ${hiddenByTimezone} lead${hiddenByTimezone !== 1 ? "s" : ""} resting outside 8 AM - 8 PM dialing hours.
+          </div><br>`
           : ``;
 
       feedWrap.innerHTML = `
@@ -2128,52 +2182,38 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   }
 
   // ==========================================
-  // 🚀 DYNAMIC QUICK REPLIES & SMS COMPOSER TOGGLE
+  // 🚀 DYNAMIC QUICK REPLIES (RESTORED FOR EVERYONE)
   // ==========================================
   const activeLead = myLeads[_currentFeedIndex];
-
   const qrContainer = clone.getElementById("sms-quick-reply-container");
-  const smsInputBox = clone.getElementById("sms-input-box");
-  const smsComposerWrapper = smsInputBox
-    ? smsInputBox.closest("div[style*='padding: 16px 20px']")
-    : null;
 
-  if (!adminView) {
-    // Standard Agents: Hide the texting tools so they use their personal phones
-    if (smsComposerWrapper) smsComposerWrapper.style.display = "none";
-    if (qrContainer) qrContainer.style.display = "none";
-  } else {
-    // Admins: Keep the texting tools active
-    if (smsComposerWrapper) smsComposerWrapper.style.display = "block";
+  if (qrContainer && Config.smsTemplates) {
+    Object.keys(Config.smsTemplates).forEach((key) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-ghost-sm";
+      btn.style.cssText =
+        "background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32; transition: all 0.2s;";
+      btn.textContent = "+ " + key.charAt(0).toUpperCase() + key.slice(1);
 
-    if (qrContainer && Config.smsTemplates) {
-      Object.keys(Config.smsTemplates).forEach((key) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "btn-ghost-sm";
-        btn.style.cssText =
-          "background: #1e1e24; color: #f8fafc; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px solid #2a2a32; transition: all 0.2s;";
-        btn.textContent = "+ " + key.charAt(0).toUpperCase() + key.slice(1);
-
-        btn.onclick = () => {
-          let txt = Config.smsTemplates[key];
-          if (activeLead) {
-            const cleanName =
-              activeLead.firstName ||
-              (activeLead.name ? activeLead.name.split(" ")[0] : "there");
-            const cleanAgent =
-              window._agentName.split(" ")[0] || "your Verizon specialist";
-            const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
-            txt = txt
-              .replace(/{FirstName}/gi, cleanName)
-              .replace(/{AgentName}/gi, cleanAgent)
-              .replace(/{BTN}/gi, cleanBTN);
-          }
-          SMS.insertQuickReply(txt);
-        };
-        qrContainer.appendChild(btn);
-      });
-    }
+      btn.onclick = () => {
+        let txt = Config.smsTemplates[key];
+        if (activeLead) {
+          const cleanName =
+            activeLead.firstName ||
+            (activeLead.name ? activeLead.name.split(" ")[0] : "there");
+          const cleanAgent =
+            window._agentName.split(" ")[0] || "your Verizon specialist";
+          const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
+          txt = txt
+            .replace(/{FirstName}/gi, cleanName)
+            .replace(/{AgentName}/gi, cleanAgent)
+            .replace(/{BTN}/gi, cleanBTN);
+        }
+        SMS.insertQuickReply(txt);
+      };
+      qrContainer.appendChild(btn);
+    });
   }
 
   if (subtitleEl) {
@@ -2193,7 +2233,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (window._clockTimer) clearInterval(window._clockTimer);
   window._clockTimer = setInterval(updateClock, 1000);
 }
-
 function searchMyLeads(q) {
   const wrap = document.getElementById("my-leads-table");
   if (!wrap) return;
