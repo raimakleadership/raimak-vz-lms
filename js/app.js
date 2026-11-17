@@ -4411,7 +4411,7 @@ const Automation = {
       personalized || "Type a template to generate preview...";
   },
 
-  // 10. Mass Blast Launcher with Sequential 1.5s A2P 10DLC Throttling & Background Support
+  // 10. Mass Blast Launcher (Final Clean Version)
   async launchMassBlast() {
     if (this.isBlastRunning) {
       UI.showToast(
@@ -4448,7 +4448,7 @@ const Automation = {
           "warning",
         );
         return alert(
-          `You are trying to blast ${selectedIds.length} leads, but you only have ${remainingAllowed} texts left in your daily limit. Please uncheck some leads.`,
+          `You are trying to blast ${selectedIds.length} leads, but you only have ${remainingAllowed} texts left. Please uncheck some leads.`,
         );
       }
     }
@@ -4460,8 +4460,7 @@ const Automation = {
       return alert("Template copy cannot be empty.");
     }
 
-    // 🚀 UNIVERSAL HANDOFF ENFORCER: No dropdowns, no "no_change".
-    // Every single mass blast forces the lead to "SMS Contacted".
+    // 🚀 UNIVERSAL HANDOFF ENFORCER: Every blast forces "SMS Contacted"
     const targetStatus = "SMS Contacted";
     const statusNotice = `\n\nTheir status will automatically be updated to: "${targetStatus}".`;
 
@@ -4485,7 +4484,7 @@ const Automation = {
 
     for (let i = 0; i < total; i++) {
       const id = selectedIds[i];
-      const lead = State.leads.find((l) => l.id === id);
+      const lead = State.leads.find((l) => l.id == id); // Loose equality (==) for string/number safety
 
       if (!lead || lead.SMSOptOut === true || lead.smsOptOut === true) {
         failCount++;
@@ -4508,15 +4507,15 @@ const Automation = {
       const personalizedBody = SMS.sanitizeForGSM7(
         templateText
           .replace(
-            /{FirstName}/g,
+            /{FirstName}/gi,
             lead.firstName || (lead.name ? lead.name.split(" ")[0] : "there"),
           )
-          .replace(/{LastName}/g, lead.lastName || "")
+          .replace(/{LastName}/gi, lead.lastName || "")
           .replace(
-            /{BTN}/g,
+            /{BTN}/gi,
             lead.btn || lead.BTN || lead.phone || "your account",
           )
-          .replace(/{AgentName}/g, agentFirstName),
+          .replace(/{AgentName}/gi, agentFirstName),
       );
 
       const activeLaunchBtn = document.getElementById("btn-launch-campaign");
@@ -4531,10 +4530,11 @@ const Automation = {
 
       try {
         const cbrToSend = cleanPhone.slice(-10);
-        // 1. Send the text via Twilio
-        await SMSApi.sendTextMessage(cbrToSend, personalizedBody);
 
-        // 2. Immediately force the SharePoint update
+        // 🚀 THE FIX: Correctly calls the exposed API from graph.js
+        await Graph.sendTextMessage(cbrToSend, personalizedBody);
+
+        // Push status update to SharePoint
         await Graph.updateLead(lead.id, { Status: targetStatus });
         lead.status = targetStatus;
         sentCount++;
