@@ -1987,8 +1987,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     const isFresh = l.status === "Yes" || l.status === "New";
 
     if (isCallbackDue) buckets.callbacks.push(l);
-    else if (isUnread)
-      buckets.yes.push(l); // "yes" bucket exclusively holds Unread SMS leads
+    else if (isUnread) buckets.yes.push(l);
     else if (isFresh) buckets.new.push(l);
     else buckets.followup.push(l);
   });
@@ -2010,7 +2009,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (window._forceShowLead && window._myLeads && window._myLeads.length > 0) {
     myLeads = window._myLeads;
   } else if (adminView) {
-    // 👑 ADMIN 4-TAB RESOLUTION
     if (
       !tab ||
       tab === "noreply" ||
@@ -2024,10 +2022,8 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
     window._currentMyLeadsTab = tab;
     myLeads = buckets[tab] || [];
   } else {
-    // 🚀 AGENT 2-TAB RESOLUTION (Smart Auto-Routing)
     if (!tab || tab === "noreply" || !["queue", "replies"].includes(tab)) {
-      if (buckets.yes.length > 0)
-        tab = "replies"; // Force to replies if they have unread messages!
+      if (buckets.yes.length > 0) tab = "replies";
       else tab = "queue";
     }
     window._currentMyLeadsTab = tab;
@@ -2055,13 +2051,10 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (textEl) textEl.textContent = contactsToday;
 
   if (!adminView) {
-    // ==========================================
-    // 🚀 SMART 2-TAB AGENT UI BUILDER
-    // ==========================================
     const tabCallbacks = clone.getElementById("tab-ml-callbacks");
     const tabFollowup = clone.getElementById("tab-ml-followup");
-    const tabYes = clone.getElementById("tab-ml-yes"); // Repurposed for "New Replies"
-    const tabNew = clone.getElementById("tab-ml-new"); // Repurposed for "My Queue"
+    const tabYes = clone.getElementById("tab-ml-yes");
+    const tabNew = clone.getElementById("tab-ml-new");
 
     if (tabCallbacks) tabCallbacks.style.display = "none";
     if (tabFollowup) tabFollowup.style.display = "none";
@@ -2079,7 +2072,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       tabYes.setAttribute("onclick", "renderMyLeads('replies')");
       tabYes.innerHTML = `New Replies <span style="background: #00e676; color: #0a1a14; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px; opacity: ${repliesCount > 0 ? "1" : "0.3"}">${repliesCount}</span>`;
 
-      // 🚨 DYNAMIC CSS PULSE ANIMATION
       if (repliesCount > 0) {
         if (!document.getElementById("style-pulse-replies")) {
           const style = document.createElement("style");
@@ -2110,9 +2102,6 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
       }
     });
   } else {
-    // ==========================================
-    // 👑 STANDARD ADMIN 4-TAB UI
-    // ==========================================
     const tabsUI = {
       callbacks: clone.getElementById("tab-ml-callbacks"),
       yes: clone.getElementById("tab-ml-yes"),
@@ -2182,10 +2171,17 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   }
 
   // ==========================================
-  // 🚀 DYNAMIC QUICK REPLIES (RESTORED FOR EVERYONE)
+  // 🚀 DYNAMIC QUICK REPLIES + NAME CAPITALIZATION
   // ==========================================
   const activeLead = myLeads[_currentFeedIndex];
   const qrContainer = clone.getElementById("sms-quick-reply-container");
+  const smsInputBox = clone.getElementById("sms-input-box");
+  const smsComposerWrapper = smsInputBox
+    ? smsInputBox.closest("div[style*='padding: 16px 20px']")
+    : null;
+
+  if (smsComposerWrapper) smsComposerWrapper.style.display = "block";
+  if (qrContainer) qrContainer.style.display = "flex";
 
   if (qrContainer && Config.smsTemplates) {
     Object.keys(Config.smsTemplates).forEach((key) => {
@@ -2198,22 +2194,94 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
 
       btn.onclick = () => {
         let txt = Config.smsTemplates[key];
+
+        // Office Number Prompt
+        if (txt.includes("{OfficeNumber}")) {
+          let savedOfficeNum = localStorage.getItem("RaimakAgentOfficeNumber");
+          if (!savedOfficeNum) {
+            savedOfficeNum = prompt(
+              "Please enter your direct Office / Callback Number:\n(We will save this for your future texts)",
+            );
+            if (savedOfficeNum && savedOfficeNum.trim() !== "") {
+              localStorage.setItem(
+                "RaimakAgentOfficeNumber",
+                savedOfficeNum.trim(),
+              );
+              const editBtn = document.getElementById("btn-edit-office-num");
+              if (editBtn)
+                editBtn.innerHTML = `⚙️ Office #: <span style="color:#00e676;">${savedOfficeNum.trim()}</span>`;
+            } else {
+              if (typeof UI !== "undefined" && UI.showToast)
+                UI.showToast(
+                  "Office number is required for this template.",
+                  "error",
+                );
+              return;
+            }
+          }
+          txt = txt.replace(/{OfficeNumber}/gi, savedOfficeNum);
+        }
+
+        // 🚀 NAME FORMATTER LOGIC (Forces Title Case: "JOHN" -> "John")
         if (activeLead) {
-          const cleanName =
+          const formatName = (str) => {
+            if (!str) return "";
+            const s = str.trim();
+            return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+          };
+
+          const rawLeadName =
             activeLead.firstName ||
-            (activeLead.name ? activeLead.name.split(" ")[0] : "there");
-          const cleanAgent =
-            window._agentName.split(" ")[0] || "your Verizon specialist";
+            (activeLead.name ? activeLead.name.split(" ")[0] : "");
+          const cleanName = rawLeadName ? formatName(rawLeadName) : "there";
+
+          const rawAgentName = window._agentName
+            ? window._agentName.split(" ")[0]
+            : "";
+          const cleanAgent = rawAgentName
+            ? formatName(rawAgentName)
+            : "your Verizon specialist";
+
           const cleanBTN = activeLead.btn || activeLead.BTN || "your account";
+
           txt = txt
             .replace(/{FirstName}/gi, cleanName)
             .replace(/{AgentName}/gi, cleanAgent)
             .replace(/{BTN}/gi, cleanBTN);
         }
+
         SMS.insertQuickReply(txt);
       };
       qrContainer.appendChild(btn);
     });
+
+    // Edit Office Number Button
+    const editOfficeBtn = document.createElement("button");
+    editOfficeBtn.id = "btn-edit-office-num";
+    editOfficeBtn.type = "button";
+    editOfficeBtn.className = "btn-ghost-sm";
+    editOfficeBtn.style.cssText =
+      "background: transparent; color: #94a3b8; padding: 4px 10px; border-radius: 14px; font-size: 11px; white-space: nowrap; border: 1px dashed #3f3f46; margin-left: auto; transition: all 0.2s; cursor: pointer;";
+
+    const currentNum = localStorage.getItem("RaimakAgentOfficeNumber");
+    editOfficeBtn.innerHTML = currentNum
+      ? `⚙️ Office #: <span style="color:#00e676;">${currentNum}</span>`
+      : `⚙️ Set Office #`;
+
+    editOfficeBtn.onclick = () => {
+      const existingNum = localStorage.getItem("RaimakAgentOfficeNumber") || "";
+      const newNum = prompt(
+        "Update your direct Office / Callback Number:",
+        existingNum,
+      );
+      if (newNum !== null && newNum.trim() !== "") {
+        localStorage.setItem("RaimakAgentOfficeNumber", newNum.trim());
+        editOfficeBtn.innerHTML = `⚙️ Office #: <span style="color:#00e676;">${newNum.trim()}</span>`;
+        if (typeof UI !== "undefined" && UI.showToast)
+          UI.showToast("Office number updated successfully!", "success");
+      }
+    };
+    qrContainer.appendChild(editOfficeBtn);
   }
 
   if (subtitleEl) {
@@ -2233,6 +2301,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
   if (window._clockTimer) clearInterval(window._clockTimer);
   window._clockTimer = setInterval(updateClock, 1000);
 }
+
 function searchMyLeads(q) {
   const wrap = document.getElementById("my-leads-table");
   if (!wrap) return;

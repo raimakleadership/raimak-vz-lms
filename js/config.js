@@ -91,7 +91,7 @@ const Config = {
 
   roles: {
     admins: [
-      "m.mcalpine@raimak.com",
+      "m.mcaline@raimak.com",
       "B.Hinesley@raimak.com",
       "S.Balleste@raimak.com",
       "N.Caldwell@raimak.com",
@@ -116,6 +116,12 @@ const Config = {
       "Hi {FirstName}, following up on your Verizon & Frontier bundle savings! Don't leave that $15/mo Frontier bill discount and free Verizon perk on the table. Want me to run a quick quote for your mobile lines today?\n\nReply STOP to opt out.",
     scheduling:
       "Hi {FirstName}, this is {AgentName} with Verizon. I have a few open slots this week to get your Verizon mobile lines activated and lock in your $15/mo Frontier discount. Does morning or afternoon work better for a quick call?\n\nReply STOP to opt out.",
+    contact1:
+      "Hi {FirstName},\nThis is {AgentName} with Frontier's Verizon Team. I'm reaching out because you have Frontier Fiber at home, which means you may qualify for extra savings on your cell phone service now that Frontier is part of Verizon. I'd be happy to get you a quick quote!\n\nFeel free to call me at {OfficeNumber} or just reply to this text.\n\nReply STOP to opt out.",
+    contact2:
+      "Hi {FirstName},\nThis is {AgentName} again with Frontier's Verizon Team! Just following up on my last message. As a Frontier Fiber customer, you may be able to save on your cell phone bill with Verizon. It only takes a few minutes to get a quote.\n\nCall me at {OfficeNumber} or reply here anytime!\n\nReply STOP to opt out.",
+    contact3:
+      "Hi {FirstName},\nThis is {AgentName} with Frontier's Verizon Team. I wanted to reach out one more time. Whenever you'd like to see what you could save on your cell phone service as a Frontier Fiber customer, I'm happy to help.\n\nJust call me at {OfficeNumber} or reply to this text. Have a wonderful day!\n\nReply STOP to opt out.",
     closing:
       "Thank you for bundling with Verizon, {FirstName}! Your mobile plan and $15/mo Frontier Fiber discount are locked in. If you ever have questions about your account ({BTN}), feel free to text this number back!\n\nReply STOP to opt out.",
   },
