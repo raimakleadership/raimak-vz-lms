@@ -3166,7 +3166,7 @@ function advanceToNextLead() {
 // ============================================================
 //  ASSIGN LEADS (Admin only)
 // ============================================================
-function renderAssignLeads() {
+function renderAssignLeads(savedFilters = null) {
   if (!isAdmin()) {
     navigate("myleads");
     return;
@@ -3180,6 +3180,13 @@ function renderAssignLeads() {
       !l.assignedTo && !Config.terminalStatuses.includes(l.status);
     return isValidLead && isAvailable;
   });
+
+  const newPoolCount = unassigned.filter(
+    (l) => (l.status || "New") === "New",
+  ).length;
+  const smsPoolCount = unassigned.filter(
+    (l) => l.status === "SMS Contacted",
+  ).length;
 
   const agentCounts = {};
   contractors.forEach((c) => (agentCounts[c.name] = 0));
@@ -3248,7 +3255,7 @@ function renderAssignLeads() {
     <div class="view-header" style="margin-bottom: 16px;">
       <div>
         <h1 class="view-title">Assign Leads</h1>
-        <span class="view-subtitle">// ${unassigned.length} total assignable</span>
+        <span class="view-subtitle">// ${newPoolCount} New · ${smsPoolCount} SMS Contacted (${unassigned.length} total)</span>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn-cyan" onclick="navigate('drip')">Drip Feed Mode</button>
@@ -3266,10 +3273,10 @@ function renderAssignLeads() {
       <select id="bulk-type-select" class="form-input" style="width: 120px;"><option value="all">Any Type</option></select>
       <select id="bulk-state-select" class="form-input" style="width: 120px;"><option value="all">Any State</option></select>
       
-      <select id="bulk-lead-status-select" class="form-input" style="width: 190px;">
-        <option value="all">Any Status</option>
+      <select id="bulk-lead-status-select" class="form-input" style="width: 210px;">
         <option value="new">New Leads Only</option>
         <option value="no_reply">No Reply (SMS Contacted)</option>
+        <option value="all">All Unassigned (New + SMS)</option>
       </select>
       
       <select id="bulk-sort-select" class="form-input" style="width: 150px;">
@@ -3307,8 +3314,8 @@ function renderAssignLeads() {
         <span id="agent-readiness-badge" style="display:none; align-items:center; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 700; transition: all 0.2s ease; white-space: nowrap;"></span>
 
         <div style="display:flex; align-items:center; gap:12px; margin-left: auto;">
-          <input type="number" id="bulk-agent-qty" class="form-input" min="1" max="${unassigned.length}" placeholder="Qty" style="width: 90px;">
-          <span id="bulk-type-count" style="font-size: 13px; color: #6B85B0; white-space: nowrap;">of ${unassigned.length} available</span>
+          <input type="number" id="bulk-agent-qty" class="form-input" min="1" max="${newPoolCount}" placeholder="Qty" style="width: 90px;">
+          <span id="bulk-type-count" style="font-size: 13px; color: #6B85B0; white-space: nowrap;">of ${newPoolCount} available</span>
           <button class="btn-primary" onclick="bulkAssignToSelectedAgent()">Assign Leads</button>
         </div>
       </div>
@@ -3405,13 +3412,12 @@ function renderAssignLeads() {
     const selectedState = stateSelect ? stateSelect.value : "all";
     const selectedBatch = batchSelect ? batchSelect.value : "all";
     const selectedSort = sortSelect ? sortSelect.value : "newest";
-    const selectedStatusFilter = statusSelect ? statusSelect.value : "all";
+    const selectedStatusFilter = statusSelect ? statusSelect.value : "new";
 
     const filteredLeads = unassigned.filter(function (l) {
-      // 🚀 THE NEW STATUS FILTER LOGIC
       let passesStatusFilter = true;
       if (selectedStatusFilter === "new") {
-        passesStatusFilter = l.status === "New";
+        passesStatusFilter = (l.status || "New") === "New";
       } else if (selectedStatusFilter === "no_reply") {
         passesStatusFilter = l.status === "SMS Contacted";
       }
@@ -3603,7 +3609,7 @@ function renderAssignLeads() {
       if (typeSelect) typeSelect.value = "all";
       if (stateSelect) stateSelect.value = "all";
       if (sortSelect) sortSelect.value = "newest";
-      if (statusSelect) statusSelect.value = "all";
+      if (statusSelect) statusSelect.value = "new";
 
       currentPage = 1;
       updateDynamicDropdowns();
@@ -3623,9 +3629,38 @@ function renderAssignLeads() {
   });
 
   // 7. Initial Draw
-  updateDynamicDropdowns();
+  if (savedFilters) {
+    if (
+      batchSelect &&
+      [...batchSelect.options].some((o) => o.value === savedFilters.batch)
+    ) {
+      batchSelect.value = savedFilters.batch;
+    }
+    updateDynamicDropdowns();
+    if (
+      typeSelect &&
+      [...typeSelect.options].some((o) => o.value === savedFilters.type)
+    ) {
+      typeSelect.value = savedFilters.type;
+    }
+    if (
+      stateSelect &&
+      [...stateSelect.options].some((o) => o.value === savedFilters.state)
+    ) {
+      stateSelect.value = savedFilters.state;
+    }
+    if (statusSelect && savedFilters.status) {
+      statusSelect.value = savedFilters.status;
+    }
+    if (sortSelect && savedFilters.sort) {
+      sortSelect.value = savedFilters.sort;
+    }
+  } else {
+    updateDynamicDropdowns();
+  }
   updateTableAndMath();
 }
+
 async function assignLead(leadId) {
   const select = document.getElementById("assign-" + leadId);
   const agent = select && select.value;
