@@ -41,6 +41,7 @@ const Config = {
     "1st Contact",
     "2nd Contact",
     "3rd Contact",
+    "Not Interested",
     "Do Not Call",
     "Already has VZ",
     "Sold",
@@ -51,6 +52,7 @@ const Config = {
   terminalStatuses: [
     "Do Not Call",
     "Sold",
+    "Not Interested",
     "FNQ",
     "Already has VZ",
     "TDM",
@@ -91,7 +93,7 @@ const Config = {
 
   roles: {
     admins: [
-      "m.mcaline@raimak.com",
+      "m.mcalpine@raimak.com",
       "B.Hinesley@raimak.com",
       "S.Balleste@raimak.com",
       "N.Caldwell@raimak.com",
