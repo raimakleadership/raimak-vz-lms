@@ -50,6 +50,7 @@ const Config = {
 
   // Terminal statuses — removed from agent queue, admin only
   terminalStatuses: [
+    "3rd Contact",
     "Do Not Call",
     "Sold",
     "Not Interested",

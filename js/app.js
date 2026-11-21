@@ -1896,13 +1896,7 @@ function renderMyLeads(tab = window._currentMyLeadsTab) {
 
   const baseLeads = State.leads.filter((l) => {
     const currentStatus = l.status || "New";
-    const validQueueStatuses = [
-      "New",
-      "Yes",
-      "1st Contact",
-      "2nd Contact",
-      "3rd Contact",
-    ];
+    const validQueueStatuses = ["New", "Yes", "1st Contact", "2nd Contact"];
 
     if (!l.verifiedYes && !validQueueStatuses.includes(currentStatus))
       return false;
